@@ -1,0 +1,70 @@
+%% PROVE skill — current SupervisorAgent solve flow.
+%% Sources: agent/supervisor.py, agent/cot_agent.py, agent/react_agent.py,
+%%          agent/stage_scheduler.py, agent/stage_handlers/*, verification/*,
+%%          lean/runner.py, lean/verifier.py
+
+flowchart TD
+    U([User confirms goal]) --> WS[WebSocket /ws/solve]
+    WS --> BUILD[_build_agent<br/>main LLM + critic LLM<br/>ToolRegistry<br/>optional LeanRunner + LeanCodegen]
+    BUILD --> SUP[SupervisorAgent.solve]
+
+    SUP --> GEEKY{geeky flag?}
+    GEEKY -- yes --> CONJ[run_conjecta_geeky_mode<br/>math_agent/geeky pipeline]
+    CONJ --> DONE
+
+    GEEKY -- no --> INTAKE[SupervisorIntake.analyze<br/>route + source digest + optional search]
+    INTAKE --> AUG[ContextAugmentor<br/>knowledge + plan memory]
+    AUG --> PRIOR{prior trace?}
+    PRIOR -- relevant --> PREAMBLE[critic LLM builds compact preamble]
+    PRIOR -- none / not relevant --> EXEC
+    PREAMBLE --> EXEC{strategy}
+
+    EXEC -- cot --> COT[CoTAgent<br/>single streaming answer]
+    EXEC -- react --> REACT[ReActAgent<br/>Thought -> Action -> Observation]
+    EXEC -- staged --> STAGED[StageScheduler]
+
+    subgraph react [React path]
+        REACT --> TOOLS[ToolRegistry actions]
+        TOOLS --> COMPUTE[compute]
+        TOOLS --> SEARCH[search / searching / fetch_url]
+        TOOLS --> KNOW[knowledge + material tools]
+        TOOLS --> LEANTOOLS[search_mathlib / formalize / lean_check]
+        COMPUTE & SEARCH & KNOW & LEANTOOLS --> REVIEWS[Reviewer panel<br/>critic / formal / knowledge / fidelity]
+    end
+
+    subgraph staged [Staged path]
+        STAGED --> PLAN[PlannerAgent]
+        PLAN --> EXPLORE[ReActExplorerAgent]
+        EXPLORE --> VERIFY[VerifierAgent<br/>lean_check artifact]
+        VERIFY --> REVIEW[ReviewerAgent]
+        REVIEW --> CONSOLIDATE[ConsolidatorAgent]
+    end
+
+    subgraph verify [Shared verification surfaces]
+        LEANTOOLS --> RUNNER[LeanRunner<br/>lake build]
+        RUNNER --> LEANVER[LeanVerifier<br/>placeholder gate + diagnostics]
+        VERIFY --> VREPORT[VerificationReport<br/>stored in artifact]
+        LEANVER --> VREPORT
+        REVIEWS --> RREPORT[report_from_review_result<br/>migration adapter]
+    end
+
+    COT --> SOL[ReActSolution]
+    REVIEWS --> SOL
+    CONSOLIDATE --> SOL
+
+    SOL --> MEMORY{memory enabled?}
+    MEMORY -- yes --> MEM[MemoryConsolidator<br/>KnowledgeEvaluator]
+    MEMORY -- no --> DONE
+    MEM --> DONE[emit done event]
+    DONE --> GUI([Step cards, Lean blocks, summary])
+
+    classDef llm fill:#1e3a5f,stroke:#3b82f6,color:#dbeafe;
+    classDef tool fill:#3b2f1e,stroke:#f59e0b,color:#fde68a;
+    classDef verify fill:#1e3b2f,stroke:#10b981,color:#a7f3d0;
+    classDef gate fill:#3b2f1e,stroke:#f59e0b,color:#fde68a;
+    classDef done fill:#1c1e26,stroke:#6366f1,color:#c7d2fe;
+    class BUILD,SUP,INTAKE,AUG,PREAMBLE,COT,REACT,STAGED,PLAN,EXPLORE,REVIEW,CONSOLIDATE,MEM llm;
+    class TOOLS,COMPUTE,SEARCH,KNOW,LEANTOOLS tool;
+    class VERIFY,RUNNER,LEANVER,VREPORT,RREPORT,REVIEWS verify;
+    class GEEKY,PRIOR,EXEC,MEMORY gate;
+    class SOL,DONE,GUI,CONJ done;

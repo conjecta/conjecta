@@ -1,0 +1,41 @@
+%% After a supervisor solve completes — knowledge lift + advisor.
+%% Sources: app.js handleEvent done, knowledge.js ingestSessionKnowledge
+
+flowchart TD
+    DONE([WebSocket done event]) --> RENDER[Render summary + Lean proofs]
+    RENDER --> INGEST[ingestSessionKnowledge]
+
+    subgraph lift [Session → project knowledge]
+        INGEST --> LF[extractFactsFromSession]
+        LF --> LEANF[Lean events / lean_proofs<br/>→ addFact verification=lean]
+        LF --> MATF[Human-review conclusions<br/>→ candidate materials kind=fact]
+
+        INGEST --> LI[extractIntuitionsFromSession]
+        LI --> MATI[Verified-step heuristics<br/>→ materials kind=intuition]
+
+        INGEST --> LT[extractTricksFromSession]
+        LT --> MATT[Pattern match on steps<br/>→ materials kind=trick]
+
+        INGEST --> REV[autoLogRevisionsForSession<br/>intuition/trick worked vs failed]
+    end
+
+    LEANF --> KB[(Project stores)]
+    MATF --> KB
+    MATI --> KB
+    MATT --> KB
+    REV --> KB
+
+    DONE --> NEXT["POST /api/next-steps<br/>post-session advisor LLM"]
+    NEXT --> SUG[Suggestion card<br/>invoke_lean | extract_knowledge<br/>open_subsession | fetch_reference | note]
+
+    SUG -- invoke_lean --> LEANPROMPT[Prefill: verify in Lean]
+    SUG -- extract_knowledge --> PROP[Proposal card]
+    SUG -- open_subsession --> SUB[New sub-goal in input]
+    SUG -- fetch_reference --> READ[[READ skill]]
+
+    classDef llm fill:#1e3a5f,stroke:#3b82f6,color:#dbeafe;
+    classDef lift fill:#1e3b2f,stroke:#10b981,color:#a7f3d0;
+    classDef ui fill:#1c1e26,stroke:#6366f1,color:#c7d2fe;
+    class NEXT llm;
+    class LF,LI,LT,LEANF,MATF,MATI,MATT,REV lift;
+    class SUG,RENDER ui;

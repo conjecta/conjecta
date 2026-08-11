@@ -1,0 +1,13 @@
+# Development / test dependencies
+# Install: pip install -r requirements-dev.txt && pip install -e . --no-deps
+#
+# Dual-tracked with pyproject.toml [project.optional-dependencies] dev —
+# keep this list in sync with it (source of truth: pyproject.toml + uv.lock;
+# CI and production use `uv sync --frozen`).
+
+-r requirements.txt
+pytest>=8.0
+pytest-asyncio>=0.24.0
+ruff>=0.6
+mypy>=1.10
+pip-audit>=2.7

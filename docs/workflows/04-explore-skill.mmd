@@ -1,0 +1,29 @@
+%% EXPLORE skill — relate project knowledge; no source inspection.
+%% Sources: app.js runExploreSkill, web/app.py /api/explore-knowledge
+
+flowchart TD
+    START([EXPLORE skill<br/>e.g. relate / connect / map]) --> SNAP[Snapshot project<br/>facts, intuitions, tricks]
+    SNAP --> API["POST /api/explore-knowledge<br/>LLM synthesizer + optional focus"]
+
+    API --> OUT{Response buckets}
+
+    OUT --> SUM[summary paragraph]
+    OUT --> INT[internal_links<br/>project item ↔ project item]
+    OUT --> CK[common_knowledge<br/>classical results not yet in project]
+    OUT --> EXT[external_references<br/>textbooks, surveys, URLs]
+
+    SUM --> CARD[Explore synthesis card in chat]
+    INT --> CARD
+    CK --> CARD
+    EXT --> CARD
+
+    EXT -- user clicks Inspect --> READ[[READ skill on URL<br/>01-read-knowledge-lift.mmd]]
+
+    CARD --> GRAPH[(Optional: user adds<br/>graph edges fact↔trick↔intuition)]
+
+    classDef llm fill:#1e3a5f,stroke:#3b82f6,color:#dbeafe;
+    classDef ui fill:#1c1e26,stroke:#6366f1,color:#c7d2fe;
+    classDef store fill:#1e3b2f,stroke:#10b981,color:#a7f3d0;
+    class API llm;
+    class CARD ui;
+    class GRAPH store;

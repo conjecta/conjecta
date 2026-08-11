@@ -1,0 +1,49 @@
+logs/
+*.log
+__pycache__/
+*.py[cod]
+.pytest_cache
+.venv
+venv/
+.venv-mcp-test/
+node_modules/
+dist/
+.env
+.lean_workspace/
+.worktrees/
+.claude/
+data/artifacts/
+
+# Runtime outputs
+data/conjecta_runs/
+data/benchmarks/_src/
+data/benchmarks/**/*.jsonl
+data/benchmarks/manifest.json
+data/eval-results/
+data/eval/minif2f_*.jsonl
+data/eval/minif2f_build_report.json
+data/materials/
+data/arxiv_undergrad_theorems.jsonl
+data/plan_memory.jsonl
+conjecta/knowledge/
+
+# IDE / editor
+.cursor/
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local scratch
+test.py
+
+# Superpowers brainstorming companion
+.superpowers/
+
+.venv-dev/
+
+# Local server tuning; must not be tracked (deploy stash rollback)
+config.toml
+config.retry.toml

@@ -1,0 +1,200 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 40 24% 97%;
+    --foreground: 30 12% 12%;
+    --card: 40 30% 99%;
+    --card-foreground: 30 12% 12%;
+    --popover: 40 30% 99%;
+    --popover-foreground: 30 12% 12%;
+    --primary: 245 42% 44%;
+    --primary-foreground: 40 30% 99%;
+    --secondary: 38 18% 93%;
+    --secondary-foreground: 30 12% 20%;
+    --muted: 38 16% 93%;
+    --muted-foreground: 32 7% 44%;
+    --accent: 40 20% 92%;
+    --accent-foreground: 245 34% 34%;
+    --destructive: 2 70% 49%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 36 14% 87%;
+    --input: 36 14% 82%;
+    --ring: 245 42% 44%;
+    --radius: 14px;
+  }
+
+  .dark {
+    --background: 250 14% 7%;
+    --foreground: 40 16% 92%;
+    --card: 250 13% 10%;
+    --card-foreground: 40 16% 92%;
+    --popover: 250 14% 9%;
+    --popover-foreground: 40 16% 92%;
+    --primary: 250 66% 74%;
+    --primary-foreground: 250 30% 10%;
+    --secondary: 250 10% 15%;
+    --secondary-foreground: 40 16% 92%;
+    --muted: 250 9% 14%;
+    --muted-foreground: 250 6% 63%;
+    --accent: 250 12% 17%;
+    --accent-foreground: 250 60% 82%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 250 9% 19%;
+    --input: 250 9% 25%;
+    --ring: 250 66% 74%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background font-sans text-foreground;
+    background-image:
+      radial-gradient(ellipse 70rem 40rem at 74% -8%, hsl(var(--primary) / 0.1), transparent 70%),
+      radial-gradient(ellipse 50rem 34rem at 8% 104%, hsl(28 70% 55% / 0.06), transparent 70%);
+    background-attachment: fixed;
+    letter-spacing: -0.006em;
+  }
+  .dark body {
+    background-image:
+      radial-gradient(ellipse 70rem 40rem at 74% -8%, hsl(var(--primary) / 0.13), transparent 70%),
+      radial-gradient(ellipse 50rem 34rem at 8% 104%, hsl(280 60% 60% / 0.08), transparent 70%);
+  }
+  ::selection {
+    background: hsl(var(--primary) / 0.22);
+  }
+}
+
+@layer components {
+  /* Layered card: hairline border + soft lift, tuned per theme. */
+  .surface {
+    @apply rounded-2xl border bg-card;
+    box-shadow:
+      0 1px 2px hsl(var(--foreground) / 0.04),
+      0 12px 28px -20px hsl(var(--foreground) / 0.22);
+  }
+  .dark .surface {
+    box-shadow:
+      inset 0 1px 0 hsl(0 0% 100% / 0.04),
+      0 16px 36px -24px hsl(0 0% 0% / 0.7);
+  }
+  .eyebrow {
+    @apply font-mono text-[10px] font-medium uppercase tracking-[0.22em] text-muted-foreground;
+  }
+  .panel {
+    @apply flex flex-col border-r bg-card/60 backdrop-blur-sm;
+  }
+  .panel-header {
+    @apply flex min-h-12 items-center justify-between border-b border-border/70 px-4 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground;
+  }
+  .kb-list {
+    @apply flex flex-col gap-2 px-2 py-1;
+  }
+  .kb-item {
+    @apply block min-w-0 overflow-hidden rounded-xl border border-l-2 bg-card/70 px-3 py-2.5 font-sans text-xs transition-all duration-200 hover:-translate-y-px hover:border-primary/30 hover:bg-card hover:shadow-[0_10px_24px_-18px_hsl(var(--foreground)/0.4)];
+  }
+  .kb-kind-badge {
+    @apply inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[10px] font-medium uppercase tracking-wide;
+  }
+  .kb-language-choice {
+    @apply inline-flex shrink-0 rounded-full border bg-card p-0.5 font-mono text-[10px] text-muted-foreground;
+  }
+  .kb-language-option {
+    @apply rounded-full px-2 py-0.5 leading-none transition-colors hover:text-foreground disabled:cursor-wait disabled:opacity-60;
+  }
+  .kb-language-option.is-active {
+    @apply bg-foreground text-background;
+  }
+  .kb-item-title {
+    @apply min-w-0 break-words text-[13px] font-semibold leading-relaxed text-foreground [overflow-wrap:anywhere];
+  }
+  .kb-item-excerpt {
+    @apply mt-1.5 line-clamp-3 leading-relaxed text-muted-foreground;
+  }
+  .kb-meta {
+    @apply mt-2 flex min-w-0 flex-wrap gap-1.5;
+  }
+  .kb-meta-chip {
+    @apply min-w-0 max-w-full rounded-md border bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] leading-4 text-muted-foreground;
+    overflow-wrap: anywhere;
+  }
+  .kb-url-chip {
+    @apply whitespace-normal break-all;
+  }
+  .kb-empty {
+    @apply mx-1 rounded-xl border border-dashed px-3 py-3 text-xs text-muted-foreground;
+  }
+  .admin-surface {
+    @apply surface;
+  }
+  .admin-metric {
+    @apply surface p-5;
+  }
+  .admin-eyebrow {
+    @apply font-mono text-[9px] font-semibold uppercase tracking-[0.19em] text-primary;
+  }
+  .admin-icon-button {
+    @apply inline-flex h-9 w-9 items-center justify-center rounded-lg border bg-card text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50;
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 999px;
+  }
+  .dark .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.3);
+  }
+  .proof-spine {
+    position: relative;
+    padding-left: 2rem;
+  }
+  .proof-spine::before {
+    content: '';
+    position: absolute;
+    inset: 0.25rem auto 0.25rem 0.55rem;
+    width: 1px;
+    background: linear-gradient(
+      to bottom,
+      hsl(var(--primary) / 0.55),
+      hsl(var(--primary) / 0.18) 45%,
+      hsl(var(--border)) 80%,
+      transparent
+    );
+  }
+  .math-float {
+    animation-name: math-drift;
+    animation-timing-function: ease-in-out;
+    animation-iteration-count: infinite;
+    animation-direction: alternate;
+  }
+  @keyframes math-drift {
+    from {
+      transform: translate3d(0, 0, 0) rotate(-3deg) scale(0.96);
+      opacity: 0.35;
+    }
+    to {
+      transform: translate3d(6px, -26px, 0) rotate(3deg) scale(1.04);
+      opacity: 0.95;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .math-float {
+      animation: none;
+    }
+  }
+}

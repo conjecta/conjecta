@@ -1,0 +1,54 @@
+%% Knowledge model — how facts, intuitions, tricks relate.
+%% Sources: knowledge.js, web/app.py extract + explore endpoints
+
+flowchart LR
+    subgraph sources [Sources]
+        URL[URL / paper]
+        UP[File upload]
+        SESS[Solve session]
+        USER[User manual add]
+    end
+
+    subgraph extract [Extraction paths]
+        LLM["/api/extract-knowledge"]
+        HEUR[Heuristic extractors]
+        SESSIN[ingestSessionKnowledge]
+    end
+
+    subgraph stores [Project stores]
+        FACTS[(facts<br/>verified statements)]
+        INTU[(intuitions<br/>strategies & heuristics)]
+        TRICKS[(tricks<br/>reusable techniques)]
+        MATS[(materials<br/>candidates pending review)]
+        GRAPH[(graph edges<br/>fact↔fact, trick→fact, …)]
+    end
+
+    URL --> LLM
+    URL --> HEUR
+    UP --> HEUR
+    SESS --> SESSIN
+    USER --> stores
+
+    LLM --> MATS
+    HEUR --> MATS
+    SESSIN --> FACTS
+    SESSIN --> MATS
+
+    MATS -- promote / accept --> FACTS
+    MATS -- promote / accept --> INTU
+    MATS -- promote / accept --> TRICKS
+
+    FACTS -. verification .-> V{lean | human | pending}
+    INTU -. revisions .-> R[worked / failed per session]
+    TRICKS -. revisions .-> R
+
+    FACTS --> GRAPH
+    INTU --> GRAPH
+    TRICKS --> GRAPH
+
+    classDef src fill:#3b2f1e,stroke:#f59e0b,color:#fde68a;
+    classDef proc fill:#1e3a5f,stroke:#3b82f6,color:#dbeafe;
+    classDef store fill:#1e3b2f,stroke:#10b981,color:#a7f3d0;
+    class URL,UP,SESS,USER src;
+    class LLM,HEUR,SESSIN proc;
+    class FACTS,INTU,TRICKS,MATS,GRAPH store;

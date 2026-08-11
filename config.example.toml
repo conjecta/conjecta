@@ -1,0 +1,191 @@
+[llm]
+provider = "openai"
+model = "gpt-5.6-sol"           # the public Web UI only permits this model
+base_url = "https://your-openai-compatible-endpoint.example/v1"
+temperature = 0.7
+timeout_seconds = 300.0
+max_calls_per_problem = 200      # hard cap on LLM calls per problem (actor+critic+codegen+tactic generation)
+retry_max_attempts = 3           # retries on transient errors (429/5xx/connection); 0 disables
+retry_base_seconds = 5.0         # backoff between attempts: 5s, 15s, 45s (with small jitter)
+# API key from environment: OPENAI_API_KEY
+
+[llm.critic]
+provider = "openai"
+model = "gpt-5.6-sol"
+temperature = 0.2               # lower temp for strict verification
+timeout_seconds = 180.0
+
+# Optional formal-prover role. Leave model empty to use the main model.
+# [llm.prover]
+# provider = "openai"
+# model = "gpt-5.6-sol"
+# base_url = "http://localhost:8000/v1"   # self-hosted endpoint
+# temperature = 0.7
+
+[agent]
+max_react_steps = 12            # ReActAgent turn limit
+max_conclusion_revisions = 3    # rejected conclusion retries before best effort (<0 = unlimited)
+escalation_max_react_steps = 24 # larger budget for formal proof escalation rounds
+escalation_max_tool_calls = 16  # tool call cap for escalation rounds
+escalation_replan_rounds = 1    # diagnostics-driven replan rounds when formal proof fails
+max_tool_calls = 8              # registry-tool executions per solve, including resumed work
+max_wall_seconds = 600.0        # total generation/review/tool wall-time budget
+max_identical_action_repeats = 2 # stop before executing a third identical action
+conclusion_candidate_count = 1   # set to 3 for reviewer-ranked Best-of-N on substantial informal solves
+candidate_search_min_turns = 4   # avoid candidate expansion for short/direct questions
+max_scheduler_iterations = 100  # legacy compatibility limit
+max_retries_per_stage = 3       # goal-repair rounds within a solve
+tactic_search_max_attempts = 32
+tactic_search_max_depth = 8
+tactic_search_wall_seconds = 120.0
+search_mathlib_max_calls = 3    # search_mathlib cap per solve; the ReAct prompt injects the same value
+clarify_max_steps = 4           # step budget for the supervisor's lightweight clarify path
+# Deep-search profile for the formal escalation route (tactic_search /
+# prove_by_lemmas after repeated one-shot repair failure).
+deep_search_wall_seconds = 3600.0
+deep_search_max_attempts = 200
+tools = [
+    "compute",
+    "search",
+    "search_arxiv",
+    "search_scholar",
+    "fetch_url",
+    "searching",
+    "read_sources",
+    "add_material",
+    "search_materials",
+    "search_knowledge",
+    "relate_knowledge",
+    "find_related",
+    "search_mathlib",
+    "formalize",
+    "lean_check",
+    "tactic_search",
+    "prove_by_lemmas",
+]
+reviewers_enabled = ["critic", "fidelity"]
+# Progressive disclosure for MCP tools: on the first step only the most relevant
+# MCP tools are shown; all MCP tools become visible on subsequent steps.
+mcp_progressive_disclosure = true
+mcp_initial_top_k = 3
+memory_consolidation_enabled = true      # extract facts/intuitions/tricks after each solve
+# memory_consolidation_model = "..."     # optional dedicated model for consolidation
+artifact_root = "logs/artifacts"         # writable research attempt artifact output
+research_refutation_enabled = true
+research_context_max_chars = 24000
+react_context_max_chars = 16000   # normal-mode actor context window cap (chars)
+normal_claim_check_enabled = true # hypothesis audit + computational refute for non-easy
+normal_force_review = true        # never skip reviewers via logprobs on non-easy
+normal_claim_check_max_tool_calls = 1
+easy_prompt_classifier = "critic"   # easy/hard gate for heavy stages; "rules" disables the critic call
+mid_verify_enabled = true            # mid-trace checkpoints verify uncertain intermediate claims
+mid_verify_max_calls = 3             # separate budget; never consumes max_tool_calls
+mid_verify_every = 2                 # judge at most once per N turns
+mid_verify_max_corrections = 2       # failed checkpoints before the claim is flagged unresolved
+planning_enabled = true           # one up-front planning call for non-easy prompts
+planning_max_chars = 2500
+
+[agent.hitl]
+enabled = true
+mode = "adaptive"
+review_research_plan = true
+ask_on_counterexample = true
+ask_on_reviewer_block = true
+approval_tools = ["add_material", "relate_knowledge"]
+auto_approve_tools = [
+    "compute", "search", "fetch_url", "searching", "read_sources",
+    "search_materials", "search_knowledge", "find_related",
+    "search_mathlib", "formalize", "lean_check", "tactic_search",
+]
+max_interrupts_per_run = 3
+allow_edit_action = true
+allow_freeform_feedback = true
+# Seconds a paused run waits for a human decision before the default decision
+# ("approve" when allowed, else the first allowed decision) is auto-claimed and
+# the run resumes server-side. 0 or negative disables auto-resolve (wait forever).
+auto_resolve_seconds = 600.0
+
+[verifier]
+strictness = "high"             # "standard", "high", "maximum"
+formal_policy = "explicit"       # "explicit", "all_theorems", or "disabled"
+require_lean_for_theorems = false # legacy alias for formal_policy="all_theorems"
+prefer_lean = false              # optional Lean attempts remain agent-directed
+fallback_to_human = true        # legacy verifier preference; runtime pauses use [agent.hitl]
+
+[lean]
+enabled = false                 # opt in after running math-agent-lean-setup
+lake_path = "lake"              # path to lake binary
+lean_path = "lean"              # path to lean binary
+max_repair_attempts = 3          # stop early on unsafe/infra failures or unchanged code
+mathlib_dep = true              # include mathlib in generated projects
+workspace_dir = ".lean_workspace"  # persistent project for deps + proof checks
+lean_toolchain = "leanprover/lean4:v4.30.0"
+mathlib_repo = "https://github.com/leanprover-community/mathlib4"
+mathlib_rev = "v4.30.0"         # pin to match lean_toolchain
+prefetch_cache = true           # run `lake exe cache get` after update
+update_timeout_seconds = 600
+build_timeout_seconds = 600     # raised from 300: precise imports keep most builds fast; 600 covers legitimate stragglers
+lemma_executor_wall_seconds = 240  # overall wall budget for one prove_by_lemmas decomposition run
+lemma_hook_max_attempts = 12    # per-lemma search-hook tactic attempts inside prove_by_lemmas
+lemma_hook_max_depth = 6        # per-lemma search-hook tactic depth inside prove_by_lemmas
+lemma_rescue_max_depth = 2      # recursive sub-decomposition cap for failed lemmas
+lemma_route_temperatures = [0.0, 0.5, 0.9]  # temperature ladder for multi-route lemma proof sampling
+lemma_difficulty_threshold = 4  # lemmas rated >= this (1-5 scale) get the hard-route budget
+lemma_max_routes_hard = 5       # route cap for hard lemmas
+max_check_chars = 8000          # character cap for a single lean_check input
+premise_index_enabled = true    # enable mathlib4 premise retrieval for formalization/tactic search
+max_concurrent_checks = 4       # process-wide cap per workspace/toolchain
+result_cache_size = 256         # shared across web requests in this process
+reject_unsafe_source = true     # reject compile-time IO/metaprogramming/untrusted imports
+repl_enabled = false            # build & use the Lean REPL (lake build repl) for fast structured tactic search
+repl_max_sessions = 4           # REPL session pool size
+repl_memory_limit_mb = 4096     # hard per-session address-space cap (0 = unlimited)
+lemma_max_parallel = 6          # prove independent lemmas in one dependency level concurrently
+lemma_rescue_enabled = true     # recursively decompose a failed lemma once before aborting
+lemma_route_count = 3           # sample N temperature-diversified proof routes per lemma (first verified wins)
+
+[upload]
+target = "package"              # "package", "mathlib_pr", "both"
+github_repo = "leanprover-community/mathlib4"
+
+[logging]
+enabled = true
+level = "INFO"                  # INFO records tool calls; use DEBUG for full LLM details
+dir = "logs"                    # logs/math-agent.log + logs/sessions/<id>.log
+
+[search]
+provider = "tavily"
+max_results = 5
+# Web fallback when Tavily fails or is not configured: "duckduckgo" or "none".
+fallback_provider = "duckduckgo"
+# API keys from environment:
+#   TAVILY_API_KEY             (web search)
+#   SEMANTIC_SCHOLAR_API_KEY   (optional; search_scholar works without it, lower rate limit)
+# Note: search_arxiv needs no API key.
+
+[knowledge.embedding]
+enabled = false
+provider = "openai"
+model = "text-embedding-3-small"
+# API key from environment: OPENAI_API_KEY
+
+# Optional: connect to external MCP servers to extend the tool set.
+# Tools from these servers are exposed to ReActAgent as "mcp_<server_name>_<tool_name>".
+#
+# Install the optional servers with:
+#   pip install -e ".[mcp-servers]"
+#
+# Or install individually:
+#   pip install sagemath-mcp
+#   uv tool install arxiv-mcp-server   # requires Python 3.11+
+
+# [[mcp_servers]]
+# name = "sagemath"
+# transport = "stdio"
+# command = "sagemath-mcp"
+# # args = ["--transport", "streamable-http", "--host", "127.0.0.1", "--port", "8314"]
+
+# [[mcp_servers]]
+# name = "arxiv"
+# transport = "stdio"
+# command = "arxiv-mcp-server"

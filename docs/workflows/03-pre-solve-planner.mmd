@@ -1,0 +1,49 @@
+%% Pre-solve ReAct tool planner — runs before the supervisor solve loop on PROVE skill.
+%% Sources: app.js runPlannerToolLoop, web/app.py /api/tool-react-step
+
+flowchart TD
+    START([PROVE skill — after API key check]) --> TRACE[Start tool-trace turn]
+    TRACE --> LOOP{i &lt; 4 planner steps?}
+
+    LOOP -- no --> LIMIT[Planner step limit<br/>proceed to supervisor loop]
+    LOOP -- yes --> API["POST /api/tool-react-step<br/>LLM ReAct planner"]
+
+    API --> ACT{action?}
+
+    ACT -- reject_non_math --> REPLY[non_math_reply message]
+    REPLY --> STOP1([stopHere — no solve loop])
+
+    ACT -- inspect_url --> URL[inspectUrlIntoKnowledge<br/>autoCommit=true]
+    URL --> OBS1[Append observation to steps]
+    OBS1 --> LOOP
+
+    ACT -- inspect_uploaded_file --> FILE[inspectUploadedFileIntoKnowledge]
+    FILE --> OBS2[Append observation]
+    OBS2 --> LOOP
+
+    ACT -- finish --> FIN{continue_full_loop?}
+    FIN -- false --> STOP2([stopHere — planner message only])
+    FIN -- true --> EXEC
+
+    LIMIT --> EXEC[decideExecutionPlan]
+    EXEC --> GATE{runFullLoop?}
+    GATE -- no --> STOP3([Message: refine goal])
+    GATE -- yes --> CONFIRM[Goal confirmation card]
+    CONFIRM --> HERMES([Supervisor solve loop — see 02-hermes-loop.mmd])
+
+    subgraph mines [Planner may mine knowledge before proving]
+        M1[Fetch URL / read upload]
+        M2[extract-knowledge LLM]
+        M3[Auto-commit facts / intuitions / tricks]
+    end
+
+    URL --> M1 --> M2 --> M3
+
+    classDef llm fill:#1e3a5f,stroke:#3b82f6,color:#dbeafe;
+    classDef tool fill:#3b2f1e,stroke:#f59e0b,color:#fde68a;
+    classDef gate fill:#3b2f1e,stroke:#f59e0b,color:#fde68a;
+    classDef end fill:#1c1e26,stroke:#6366f1,color:#c7d2fe;
+    class API llm;
+    class URL,FILE,M1,M2,M3 tool;
+    class ACT,FIN,GATE gate;
+    class STOP1,STOP2,STOP3,HERMES end;

@@ -1,0 +1,14 @@
+%% Conjecta workflow index — see docs/workflows/ for per-task diagrams.
+%% Render all:  mmdc -i docs/workflows/*.mmd -o docs/workflows/
+%% Or paste any file into https://mermaid.live
+
+flowchart LR
+    O[00-overview.mmd<br/>Task routing] --> R[01-read-knowledge-lift.mmd]
+    O --> P[03-pre-solve-planner.mmd]
+    P --> H[02-hermes-loop.mmd]
+    H --> S[05-post-session.mmd]
+    O --> E[04-explore-skill.mmd]
+    K[06-knowledge-stores.mmd<br/>Facts / intuitions / tricks model]
+
+    classDef doc fill:#1c1e26,stroke:#6366f1,color:#c7d2fe;
+    class O,R,P,H,S,E,K doc;

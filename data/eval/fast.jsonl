@@ -1,0 +1,54 @@
+{"id": "fast-alg-001", "problem": "Solve for x: 3x + 7 = 22. Answer with only the value of x.", "judge": "exact", "expected": "5", "tags": ["algebra", "easy"]}
+{"id": "fast-alg-002", "problem": "The equation x^2 - 5x + 6 = 0 has two roots. Answer with only the larger root.", "judge": "numeric", "expected": 3.0, "tags": ["algebra", "easy"]}
+{"id": "fast-alg-003", "problem": "Expand (x + 2)(x - 3) and evaluate the resulting polynomial at x = 5. Answer with only the number.", "judge": "numeric", "expected": 14.0, "tags": ["algebra", "medium"]}
+{"id": "fast-alg-004", "problem": "Compute 2^10. Answer with only the number.", "judge": "exact", "expected": "1024", "tags": ["algebra", "easy"]}
+{"id": "fast-alg-005", "problem": "What is the sum of the first 20 positive integers? Answer with only the number.", "judge": "numeric", "expected": 210, "tags": ["algebra", "easy"]}
+{"id": "fast-alg-006", "problem": "Solve the system 2x + 3y = 13 and x - y = 1. Answer with only the value of x + y.", "judge": "numeric", "expected": 5.4, "tags": ["algebra", "medium"]}
+{"id": "fast-alg-007", "problem": "x^2 - 9 factors as (x - a)(x + a) for a positive integer a. What is a? Answer with only the number.", "judge": "numeric", "expected": 3, "tags": ["algebra", "easy"]}
+{"id": "fast-alg-008", "problem": "Compute (1 + i)^2, where i^2 = -1. Answer in simplest form.", "judge": "exact", "expected": "2i", "tags": ["algebra", "medium"]}
+{"id": "fast-alg-009", "problem": "Consider x^2 - 4x + 1 = 0. Answer with the larger root as a decimal rounded to 3 decimal places. Answer with only the number.", "judge": "numeric", "expected": 3.732050807568877, "tolerance": 0.01, "tags": ["algebra", "medium"]}
+{"id": "fast-alg-010", "problem": "The expression (a^2 - b^2)/(a - b) simplifies to a linear expression in a and b. Evaluate that simplified expression at a = 7, b = 4. Answer with only the number.", "judge": "numeric", "expected": 11, "tags": ["algebra", "medium"]}
+{"id": "fast-alg-011", "problem": "Find the sum of all real solutions x to |x - 3| + |x + 2| = 7. Answer with only the number.", "judge": "numeric", "expected": 1.0, "tags": ["algebra", "hard"]}
+{"id": "fast-alg-012", "problem": "What is the remainder when the polynomial x^100 is divided by x^2 - 1? It is a constant; answer with only that constant.", "judge": "numeric", "expected": 1, "tags": ["algebra", "hard"]}
+{"id": "fast-alg-013", "problem": "What is the coefficient of x^2 in the expansion of (1 + x)^6? Answer with only the number.", "judge": "numeric", "expected": 15, "tags": ["algebra", "hard"]}
+{"id": "fast-nt-001", "problem": "What is gcd(48, 180)? Answer with only the number.", "judge": "numeric", "expected": 12, "tags": ["number_theory", "easy"]}
+{"id": "fast-nt-002", "problem": "What is lcm(12, 18)? Answer with only the number.", "judge": "numeric", "expected": 36, "tags": ["number_theory", "easy"]}
+{"id": "fast-nt-003", "problem": "Is 91 prime? Answer 'yes' or 'no' only.", "judge": "exact", "expected": "no", "tags": ["number_theory", "easy"]}
+{"id": "fast-nt-004", "problem": "Compute 1234 mod 97. Answer with only the number.", "judge": "numeric", "expected": 70, "tags": ["number_theory", "easy"]}
+{"id": "fast-nt-005", "problem": "Compute Euler's totient φ(36). Answer with only the number.", "judge": "numeric", "expected": 12, "tags": ["number_theory", "medium"]}
+{"id": "fast-nt-006", "problem": "What is the sum of all prime numbers between 10 and 30? Answer with only the number.", "judge": "numeric", "expected": 112, "tags": ["number_theory", "medium"]}
+{"id": "fast-nt-007", "problem": "What is the digit sum of 2^15? Answer with only the number.", "judge": "numeric", "expected": 26, "tags": ["number_theory", "medium"]}
+{"id": "fast-nt-008", "problem": "How many positive divisors does 72 have? Answer with only the number.", "judge": "numeric", "expected": 12, "tags": ["number_theory", "easy"]}
+{"id": "fast-nt-009", "problem": "What is the remainder when 2^20 is divided by 100? Answer with only the number.", "judge": "numeric", "expected": 76, "tags": ["number_theory", "medium"]}
+{"id": "fast-nt-010", "problem": "Find the smallest positive integer x such that 3x ≡ 7 (mod 11). Answer with only the number.", "judge": "numeric", "expected": 6, "tags": ["number_theory", "medium"]}
+{"id": "fast-nt-011", "problem": "How many trailing zeros does 100! (100 factorial) have? Answer with only the number.", "judge": "numeric", "expected": 24, "tags": ["number_theory", "hard"]}
+{"id": "fast-nt-012", "problem": "Find the last two digits of 7^100. Answer with only the number (0 to 99).", "judge": "numeric", "expected": 1, "tags": ["number_theory", "hard"]}
+{"id": "fast-nt-013", "problem": "What is 3^2026 mod 5? Answer with only the number.", "judge": "numeric", "expected": 4, "tags": ["number_theory", "hard"]}
+{"id": "fast-nt-014", "problem": "Find the smallest positive integer n such that n! is divisible by 1000. Answer with only n.", "judge": "numeric", "expected": 15, "tags": ["number_theory", "hard"]}
+{"id": "fast-calc-001", "problem": "Compute the derivative of f(x)=x^3 at x=2. Answer with only the number.", "judge": "numeric", "expected": 12.0, "tags": ["calculus", "easy"]}
+{"id": "fast-calc-002", "problem": "Compute the definite integral of 2x from 0 to 1. Answer with only the number.", "judge": "numeric", "expected": 1.0, "tags": ["calculus", "easy"]}
+{"id": "fast-calc-003", "problem": "What is the limit of (1 + 1/n)^n as n → ∞? Answer with the constant name.", "judge": "exact", "expected": "e", "tags": ["calculus", "medium"]}
+{"id": "fast-calc-004", "problem": "Compute the derivative of sin(x) at x=0. Answer with only the number.", "judge": "numeric", "expected": 1.0, "tags": ["calculus", "easy"]}
+{"id": "fast-calc-005", "problem": "Find the maximum value of f(x) = -x^2 + 4x + 1. Answer with only the number.", "judge": "numeric", "expected": 5.0, "tags": ["calculus", "medium"]}
+{"id": "fast-calc-006", "problem": "Compute the definite integral of 1/x from 1 to e. Answer with only the number.", "judge": "numeric", "expected": 1.0, "tags": ["calculus", "medium"]}
+{"id": "fast-calc-007", "problem": "Compute the derivative of e^x at x = ln(2). Answer with only the number.", "judge": "numeric", "expected": 2.0, "tags": ["calculus", "medium"]}
+{"id": "fast-calc-008", "problem": "What is the limit of sin(x)/x as x → 0? Answer with only the number.", "judge": "numeric", "expected": 1.0, "tags": ["calculus", "easy"]}
+{"id": "fast-calc-009", "problem": "Compute the area under y = x^2 from x=0 to x=2. Answer with only the number.", "judge": "numeric", "expected": 2.6666666666666665, "tags": ["calculus", "medium"]}
+{"id": "fast-calc-010", "problem": "Compute the gradient of f(x,y)=x^2+y^2 at the point (1,2), then answer with only the magnitude (Euclidean norm) of that gradient vector, as a decimal.", "judge": "numeric", "expected": 4.47213595499958, "tolerance": 0.01, "tags": ["calculus", "medium"]}
+{"id": "fast-calc-011", "problem": "Find the global maximum value of f(x) = x^3 - 3x on the interval [-2, 2]. Answer with only the number.", "judge": "numeric", "expected": 2.0, "tags": ["calculus", "hard"]}
+{"id": "fast-calc-012", "problem": "Evaluate the definite integral of x*e^x from 0 to 1. Answer as a decimal. Answer with only the number.", "judge": "numeric", "expected": 1.0, "tolerance": 0.001, "tags": ["calculus", "hard"]}
+{"id": "fast-calc-013", "problem": "Compute the limit of (e^x - 1 - x) / x^2 as x → 0. Answer as a decimal. Answer with only the number.", "judge": "numeric", "expected": 0.5, "tolerance": 0.001, "tags": ["calculus", "hard"]}
+{"id": "fast-geo-001", "problem": "Compute the area of a circle with radius 3. Give a numerical value.", "judge": "numeric", "expected": 28.274333882308138, "tolerance": 0.001, "tags": ["geometry", "easy"]}
+{"id": "fast-geo-002", "problem": "What is the length of the hypotenuse of a right triangle with legs 3 and 4? Answer with only the number.", "judge": "numeric", "expected": 5.0, "tags": ["geometry", "easy"]}
+{"id": "fast-geo-003", "problem": "What is the area of a triangle with base 5 and height 8? Answer with only the number.", "judge": "numeric", "expected": 20.0, "tags": ["geometry", "easy"]}
+{"id": "fast-geo-004", "problem": "What is the distance between the points (1,2) and (4,6)? Answer with only the number.", "judge": "numeric", "expected": 5.0, "tags": ["geometry", "easy"]}
+{"id": "fast-geo-005", "problem": "What is the sum of the interior angles of a convex pentagon, in degrees? Answer with only the number.", "judge": "numeric", "expected": 540.0, "tags": ["geometry", "easy"]}
+{"id": "fast-geo-006", "problem": "Compute the circumference of a circle with radius 7. Give a numerical value.", "judge": "numeric", "expected": 43.982297150257104, "tolerance": 0.001, "tags": ["geometry", "medium"]}
+{"id": "fast-geo-007", "problem": "Compute the volume of a sphere with radius 3. Give a numerical value.", "judge": "numeric", "expected": 113.09733552923254, "tolerance": 0.001, "tags": ["geometry", "medium"]}
+{"id": "fast-geo-008", "problem": "What is the slope of the line through (2,3) and (5,11)? Answer with only the number.", "judge": "numeric", "expected": 2.6666666666666665, "tags": ["geometry", "easy"]}
+{"id": "fast-geo-009", "problem": "A rectangle has diagonal length 10 and one side length 6. What is its area? Answer with only the number.", "judge": "numeric", "expected": 48.0, "tags": ["geometry", "medium"]}
+{"id": "fast-geo-010", "problem": "In a triangle with sides 3, 4, and 5, what is the measure (in degrees) of the angle opposite the side of length 5? Answer with only the number.", "judge": "numeric", "expected": 90.0, "tags": ["geometry", "easy"]}
+{"id": "fast-geo-011", "problem": "Find the radius of the circle inscribed in a right triangle with legs 3 and 4. Answer with only the number.", "judge": "numeric", "expected": 1.0, "tags": ["geometry", "hard"]}
+{"id": "fast-geo-012", "problem": "Using the shoelace formula, compute the area of the triangle with vertices (0,0), (4,1), and (1,5). Answer as a decimal. Answer with only the number.", "judge": "numeric", "expected": 9.5, "tolerance": 0.001, "tags": ["geometry", "hard"]}
+{"id": "fast-geo-013", "problem": "A regular hexagon has side length 2. Compute its area as a decimal. Answer with only the number.", "judge": "numeric", "expected": 10.392304845413264, "tolerance": 0.01, "tags": ["geometry", "hard"]}
+{"id": "fast-geo-014", "problem": "Find the acute angle, in degrees, between the lines y = x and y = 2x. Answer as a decimal rounded to 2 decimal places. Answer with only the number.", "judge": "numeric", "expected": 18.43494882292201, "tolerance": 0.1, "tags": ["geometry", "hard"]}

@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Conjecta</title>
+    <meta name="description" content="Rigorous mathematical reasoning." />
+    <meta property="og:title" content="Conjecta" />
+    <meta property="og:description" content="Rigorous mathematical reasoning." />
+    <meta property="og:type" content="website" />
+    <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg?v=20260715" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@500;600&family=Noto+Sans+SC:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css?v=20260723-nofootermail" />
+  </head>
+  <body class="page-light page-home" data-page="home">
+    <header class="site-header site-header--light home-header">
+      <div class="header-inner">
+        <div class="header-left">
+          <div class="lang-switch" role="group">
+            <button type="button" class="lang-btn active" data-lang="en" aria-pressed="true">EN</button>
+            <button type="button" class="lang-btn" data-lang="zh" aria-pressed="false">中文</button>
+          </div>
+          <a class="logo" href="/">Conjecta</a>
+        </div>
+        <nav class="site-nav" data-i18n-aria="nav.primary" aria-label="Primary">
+          <a class="active" href="/" data-i18n="nav.home">Home</a>
+          <a href="/app" data-i18n="nav.app">App</a>
+          <a href="#contact" data-i18n="nav.support">Contact support</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="home-main">
+      <section class="home-hero" aria-labelledby="home-title">
+        <div class="hero-grid" aria-hidden="true"></div>
+        <div class="hero-shell">
+          <div class="hero-copy">
+            <p class="home-kicker" data-i18n="home.kicker">A workspace for mathematical reasoning</p>
+            <h1 class="home-title" id="home-title">Conjecta</h1>
+            <p class="home-lead" data-i18n="home.lead">
+              Turn a mathematical question into a line of reasoning you can inspect.
+            </p>
+            <p class="home-intro" data-i18n="home.intro">
+              Plan a route, explore useful lemmas, call computation and formal tools, then keep the decisive steps visible.
+            </p>
+            <div class="hero-actions">
+              <a class="home-button home-button--primary" href="/app">
+                <span data-i18n="home.try">Open the workbench</span>
+                <span aria-hidden="true">↗</span>
+              </a>
+              <a class="home-button home-button--text" href="#method">
+                <span data-i18n="home.seeMethod">See how it works</span>
+                <span aria-hidden="true">↓</span>
+              </a>
+            </div>
+            <div class="hero-note" aria-live="polite" data-i18n-aria="home.phrase.aria" aria-label="Quiet phrases">
+              <span class="note-mark" aria-hidden="true">∴</span>
+              <span class="phrase-text" id="phrase-text"></span>
+              <span class="phrase-cursor" aria-hidden="true"></span>
+            </div>
+          </div>
+
+          <div class="reasoning-scene proof-folio" data-i18n-aria="home.scene.aria" aria-label="An example proof showing that the square root of two is irrational">
+            <header class="proof-folio__head">
+              <span><i aria-hidden="true">§</i><span data-i18n="home.scene.status">Reasoning trace</span></span>
+              <span>EX. 01 · IRRATIONALITY</span>
+            </header>
+
+            <div class="proof-folio__theorem">
+              <span data-i18n="home.scene.proposition">Proposition</span>
+              <strong aria-label="The square root of two is not rational">√2 <i>∉</i> ℚ</strong>
+            </div>
+
+            <div class="proof-ledger">
+              <article class="proof-ledger__row proof-ledger__row--a">
+                <header><b>A</b><span data-i18n="home.scene.assume">Assume</span></header>
+                <div>
+                  <p>√2 = p / q</p>
+                  <small>gcd(p, q) = 1</small>
+                </div>
+              </article>
+              <article class="proof-ledger__row proof-ledger__row--b">
+                <header><b>B</b><span data-i18n="home.scene.derive">Derive</span></header>
+                <div>
+                  <p>p² = 2q²</p>
+                  <small>2 ∣ p</small>
+                </div>
+              </article>
+              <article class="proof-ledger__row proof-ledger__row--c">
+                <header><b>C</b><span data-i18n="home.scene.verify">Check</span></header>
+                <div>
+                  <p>p = 2k&nbsp; ⇒ &nbsp;q² = 2k²</p>
+                  <small>2 ∣ q</small>
+                </div>
+              </article>
+              <article class="proof-ledger__row proof-ledger__row--d">
+                <header><b>D</b><span data-i18n="home.scene.result">Contradiction found</span></header>
+                <div>
+                  <p>gcd(p, q) ≥ 2</p>
+                  <strong aria-label="contradiction">⊥</strong>
+                </div>
+              </article>
+            </div>
+
+            <footer class="proof-folio__foot">
+              <span data-i18n="home.scene.strategy">parity descent</span>
+              <span><i aria-hidden="true"></i> VERIFIED</span>
+            </footer>
+          </div>
+        </div>
+        <a class="hero-scroll" href="#thesis" data-i18n="home.scroll">Follow the reasoning</a>
+      </section>
+
+      <section class="home-thesis" id="thesis" aria-labelledby="thesis-title">
+        <div class="section-shell thesis-layout">
+          <div>
+            <p class="home-kicker home-kicker--gold" data-i18n="home.thesis.kicker">What Conjecta changes</p>
+            <h2 id="thesis-title" data-i18n="home.thesis.title">Not just an answer. A route you can inspect.</h2>
+          </div>
+          <div class="thesis-copy">
+            <p data-i18n="home.thesis.body">
+              Difficult mathematics rarely moves in a straight line. Conjecta keeps exploration, verification, and revision in one visible process—so the useful artifact is the reasoning, not only the final sentence.
+            </p>
+            <div class="reasoning-legend" aria-label="Reasoning stages">
+              <span data-i18n="home.thesis.stage1">Question</span>
+              <i aria-hidden="true"></i>
+              <span data-i18n="home.thesis.stage2">Strategy</span>
+              <i aria-hidden="true"></i>
+              <span data-i18n="home.thesis.stage3">Lemmas</span>
+              <i aria-hidden="true"></i>
+              <span data-i18n="home.thesis.stage4">Verification</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="home-method" id="method" aria-labelledby="method-title">
+        <div class="section-shell">
+          <header class="section-heading">
+            <div>
+              <p class="home-kicker" data-i18n="home.method.kicker">One continuous workspace</p>
+              <h2 id="method-title" data-i18n="home.method.title">From first question to checked result</h2>
+            </div>
+            <p data-i18n="home.method.intro">
+              You set the problem and remain in control. Conjecta makes the intermediate work legible as the route develops.
+            </p>
+          </header>
+
+          <ol class="method-list">
+            <li class="method-item">
+              <span class="method-number">01</span>
+              <div class="method-symbol" aria-hidden="true">?</div>
+              <h3 data-i18n="home.method.step1.title">State the problem</h3>
+              <p data-i18n="home.method.step1.body">Describe the theorem, attach context, and mark what a satisfactory result must establish.</p>
+            </li>
+            <li class="method-item">
+              <span class="method-number">02</span>
+              <div class="method-symbol" aria-hidden="true">⌁</div>
+              <h3 data-i18n="home.method.step2.title">Build a proof route</h3>
+              <p data-i18n="home.method.step2.body">Break the goal into lemmas, compare strategies, and revise when a branch stops paying off.</p>
+            </li>
+            <li class="method-item">
+              <span class="method-number">03</span>
+              <div class="method-symbol" aria-hidden="true">⊢</div>
+              <h3 data-i18n="home.method.step3.title">Check decisive steps</h3>
+              <p data-i18n="home.method.step3.body">Use computation, retrieval, structural checks, or Lean where the argument needs firmer ground.</p>
+            </li>
+            <li class="method-item">
+              <span class="method-number">04</span>
+              <div class="method-symbol" aria-hidden="true">∎</div>
+              <h3 data-i18n="home.method.step4.title">Keep the useful trail</h3>
+              <p data-i18n="home.method.step4.body">Review the route, continue the same project, and retain context worth reusing in later work.</p>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="home-capabilities" aria-labelledby="capabilities-title">
+        <div class="section-shell capabilities-layout">
+          <header class="capabilities-heading">
+            <p class="home-kicker" data-i18n="home.capabilities.kicker">Designed for serious problems</p>
+            <h2 id="capabilities-title" data-i18n="home.capabilities.title">The work stays visible.</h2>
+            <p data-i18n="home.capabilities.intro">Each layer answers a different question: where to go, what to trust, and what to carry forward.</p>
+          </header>
+
+          <div class="capability-list">
+            <article class="capability-row">
+              <div class="capability-mark">EXPLORE</div>
+              <div>
+                <h3 data-i18n="home.capabilities.explore.title">Strategy is not a black box</h3>
+                <p data-i18n="home.capabilities.explore.body">See the working plan, candidate lemmas, alternative branches, and the reason the system changes direction.</p>
+              </div>
+            </article>
+            <article class="capability-row">
+              <div class="capability-mark">VERIFY</div>
+              <div>
+                <h3 data-i18n="home.capabilities.verify.title">Verification lives inside the process</h3>
+                <p data-i18n="home.capabilities.verify.body">Computation and formal tooling can test the steps that matter, with their outcomes kept beside the argument.</p>
+              </div>
+            </article>
+            <article class="capability-row">
+              <div class="capability-mark">REMEMBER</div>
+              <div>
+                <h3 data-i18n="home.capabilities.remember.title">Context can accumulate</h3>
+                <p data-i18n="home.capabilities.remember.body">Projects preserve the conversation and the proof state, while reusable knowledge can support the next problem.</p>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="home-cta" aria-labelledby="cta-title">
+        <div class="cta-orbit" aria-hidden="true"></div>
+        <div class="section-shell cta-layout">
+          <div>
+            <p class="home-kicker home-kicker--gold" data-i18n="home.cta.kicker">Begin with the question you already have</p>
+            <h2 id="cta-title" data-i18n="home.cta.title">Give the conjecture room to become an argument.</h2>
+          </div>
+          <a class="home-button home-button--light" href="/app">
+            <span data-i18n="home.cta.button">Start reasoning</span>
+            <span aria-hidden="true">→</span>
+          </a>
+        </div>
+      </section>
+
+      <section class="home-contact" id="contact" aria-labelledby="contact-title">
+        <div class="section-shell contact-layout">
+          <header class="contact-heading">
+            <p class="home-kicker" data-i18n="home.contact.kicker">We read every message</p>
+            <h2 id="contact-title" data-i18n="home.contact.title">Contact support</h2>
+            <p data-i18n="home.contact.intro">
+              Tell us what you need help with. Leave your email and preferred name so we can reply.
+            </p>
+          </header>
+
+          <form class="contact-form" id="contact-form" novalidate>
+            <div class="contact-fields">
+              <label class="contact-field">
+                <span data-i18n="home.contact.name">Preferred name</span>
+                <input
+                  type="text"
+                  name="name"
+                  autocomplete="name"
+                  maxlength="120"
+                  required
+                  data-i18n-placeholder="home.contact.namePlaceholder"
+                  placeholder="How should we address you?"
+                />
+              </label>
+              <label class="contact-field">
+                <span data-i18n="home.contact.email">Email</span>
+                <input
+                  type="email"
+                  name="email"
+                  autocomplete="email"
+                  maxlength="254"
+                  required
+                  data-i18n-placeholder="home.contact.emailPlaceholder"
+                  placeholder="you@example.com"
+                />
+              </label>
+            </div>
+            <label class="contact-field">
+              <span data-i18n="home.contact.message">Message</span>
+              <textarea
+                name="message"
+                rows="5"
+                maxlength="4000"
+                required
+                data-i18n-placeholder="home.contact.messagePlaceholder"
+                placeholder="What would you like help with?"
+              ></textarea>
+            </label>
+            <div class="contact-actions">
+              <button type="submit" class="home-button home-button--primary" id="contact-submit">
+                <span data-i18n="home.contact.send">Send message</span>
+              </button>
+              <p class="contact-status" id="contact-status" role="status" aria-live="polite"></p>
+            </div>
+          </form>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer home-footer">
+      <div class="footer-inner">
+        <a class="footer-brand" href="/">Conjecta</a>
+        <div class="footer-meta">
+          <p data-i18n="home.footer.note">Rigorous mathematical reasoning, made inspectable.</p>
+        </div>
+        <p class="footer-links">
+          <a href="/app" data-i18n="nav.app">App</a>
+          <a href="#contact" data-i18n="nav.support">Contact support</a>
+          <a href="/terms.html" data-i18n="footer.terms">Terms</a>
+        </p>
+      </div>
+    </footer>
+
+    <script src="i18n.js?v=20260723-mailbox"></script>
+    <script src="contact.js?v=20260723-mailbox2" defer></script>
+    <script src="banner.js?v=20260709-portico2" defer></script>
+  </body>
+</html>

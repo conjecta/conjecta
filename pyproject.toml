@@ -1,0 +1,111 @@
+[project]
+name = "math-agent"
+version = "0.1.0"
+description = "Math research agent with Lean 4 verification"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+
+[project.urls]
+Homepage = "https://conjecta.cn"
+
+dependencies = [
+    "openai>=1.50.0",
+    "sympy>=1.13.0",
+    "feedparser>=6.0",
+    "httpx>=0.27.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "websockets>=13.0",
+    "certifi>=2024.2.2",
+    "pypdf>=4.0",
+    "pdf2image>=1.17.0",
+    "beautifulsoup4>=4.12.0",
+    "python-dotenv>=1.0.0",
+    'tomli>=1.2.0; python_version < "3.11"',
+    "PyJWT>=2.8.0",
+    "alibabacloud_dypnsapi20170525>=1.0.0",
+    "mcp>=1,<2",
+    "supabase>=2.0",
+    "socksio>=0.2",
+    "cryptography>=50.0.0",
+    "tiktoken>=0.7.0",
+    "matplotlib>=3.8.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24.0", "ruff>=0.6", "mypy>=1.10", "pip-audit>=2.7"]
+mcp-servers = [
+    'sagemath-mcp; python_version >= "3.12"',
+    'arxiv-mcp-server; python_version >= "3.11"',
+]
+
+[project.scripts]
+math-agent = "math_agent.main:cli"
+math-agent-web = "math_agent.web.app:main"
+math-agent-lean-setup = "math_agent.lean.setup_cli:cli"
+
+[tool.pytest.ini_options]
+addopts = "-m 'not integration'"
+markers = [
+    "integration: requires external runtimes or downloaded dependencies",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+exclude = [
+    "/.venv",
+    "/dist",
+    "/math_agent/web/frontend/node_modules",
+    "/math_agent/web/frontend/.vite",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["math_agent"]
+exclude = ["/math_agent/web/frontend"]
+
+# ---------------------------------------------------------------------------
+# Static checks: enabled incrementally ("gate from zero to one").
+# Only rule sets that currently pass are enforced; see the notes below for
+# the known debt to clean up before widening the gates.
+# ---------------------------------------------------------------------------
+
+[tool.ruff]
+# Existing code wraps at ~120 columns; prompt strings go longer, so E501 is
+# not enforced yet (~1300 pre-existing long lines). Re-enable E501 after
+# wrapping or excluding those files.
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = [
+    "E501", # line-too-long: ~1300 pre-existing violations, enable incrementally
+]
+
+[tool.mypy]
+python_version = "3.10"
+# Default invocation (`uv run mypy`) checks only these modules. Everything
+# else in the repo is excluded via the overrides below until it can be
+# brought under the gate incrementally.
+files = [
+    "math_agent/llm",
+    "math_agent/verification",
+    "math_agent/web/security.py",
+]
+ignore_missing_imports = true
+follow_imports = "silent"
+warn_unused_ignores = true
+
+# Silences errors in every other first-party module when they are pulled in
+# as dependencies or checked explicitly.
+[[tool.mypy.overrides]]
+module = ["math_agent.*", "tests.*", "scripts.*"]
+ignore_errors = true
+
+# Later overrides win over the block above, re-enabling the gated modules.
+[[tool.mypy.overrides]]
+module = ["math_agent.llm.*", "math_agent.verification.*", "math_agent.web.security"]
+ignore_errors = false

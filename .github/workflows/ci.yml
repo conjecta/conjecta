@@ -1,0 +1,142 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  python-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # Install from the same uv.lock the production deploy script uses
+      # (scripts/deploy_conjecta.sh runs `uv sync --frozen --no-dev`), so CI
+      # and production test the same dependency tree. The dev extra adds
+      # pytest/ruff/mypy/pip-audit on top.
+      - name: Install dependencies from uv.lock
+        run: uv sync --frozen --extra dev
+
+      - name: Check for syntax errors
+        run: uv run python -m compileall math_agent tests scripts
+
+      - name: Lint with ruff
+        run: uv run ruff check math_agent scripts tests
+
+      - name: Typecheck with mypy (gated modules only, see pyproject.toml)
+        run: uv run mypy
+
+      - name: Audit Python dependencies
+        run: uv run pip-audit
+
+      - name: Validate example config loads
+        run: uv run python -c "from pathlib import Path; from math_agent.config import load_config; load_config(Path('config.example.toml'))"
+
+      - name: Validate deploy script syntax
+        run: bash -n scripts/deploy_conjecta.sh
+
+      - name: Build and inspect release wheel
+        run: |
+          uv build
+          uv run python scripts/check_release_wheel.py dist/*.whl
+
+      - name: Run pytest
+        run: uv run python -m pytest tests/ -q -m "not integration"
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: math_agent/web/frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.19.0"
+          cache: npm
+          cache-dependency-path: math_agent/web/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Typecheck frontend
+        run: npm run typecheck
+
+      - name: Run frontend tests once
+        run: npm test -- --run
+
+      - name: Build and verify committed frontend assets
+        env:
+          CONJECTA_FRONTEND_OUT_DIR: ${{ runner.temp }}/conjecta-frontend-assets
+        run: |
+          npm run build
+          rm -rf ../static
+          mkdir -p ../static
+          cp -a "$CONJECTA_FRONTEND_OUT_DIR/." ../static/
+          python3 ../../../scripts/generate_frontend_notices.py
+          test -z "$(git status --porcelain -- ../static ../../../THIRD_PARTY_FRONTEND_LICENSES.txt)"
+
+      - name: Audit frontend dependencies
+        run: npm audit --audit-level=low
+
+  lean-placeholder-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scan Lean files for blocked tokens
+        shell: bash
+        run: |
+          set -euo pipefail
+          lean_file_list="${RUNNER_TEMP}/conjecta-lean-files"
+          if ! find . -type f -name '*.lean' \
+              -not -path './.lean_workspace/*' \
+              -not -path './.git/*' \
+              -print0 >"$lean_file_list"; then
+            echo "Lean file discovery failed." >&2
+            exit 2
+          fi
+          mapfile -d '' -t lean_files <"$lean_file_list"
+          if ((${#lean_files[@]} == 0)); then
+            echo "No .lean files found; gate passed."
+            exit 0
+          fi
+
+          set +e
+          grep -nHE '(^|[^[:alnum:]_])(sorry|admit|axiom|constant|run_cmd|run_tac|#eval|unsafe|foreign|extern)([^[:alnum:]_]|$)' -- "${lean_files[@]}"
+          grep_status=$?
+          set -e
+
+          case "$grep_status" in
+            0)
+              echo "Blocked tokens found in .lean files."
+              exit 1
+              ;;
+            1)
+              echo "No blocked tokens found."
+              ;;
+            *)
+              echo "Lean token grep failed with status ${grep_status}." >&2
+              exit "$grep_status"
+              ;;
+          esac

@@ -1,0 +1,56 @@
+%% READ skill — lift facts / intuitions / tricks from materials.
+%% Sources: app.js inspectUrlIntoKnowledge, inspectUploadedFileIntoKnowledge
+%%          web/app.py /api/fetch-url, /api/extract-knowledge
+
+flowchart TD
+    START([READ skill triggered]) --> SRC{Source type?}
+
+    SRC -- URL --> FETCH["GET /api/fetch-url<br/>arXiv abs→PDF, HTML/PDF parse"]
+    SRC -- upload --> UPLOAD[Find local://upload/ material<br/>+ prior extract rows]
+
+    FETCH --> TEXT[Normalized page text]
+    UPLOAD --> EXTRACTS[Theorem-like extract rows<br/>from uploaded file]
+
+    TEXT --> RECORD[addMaterial link/file<br/>upsert project]
+    EXTRACTS --> HEUR_UPLOAD[Heuristic only path]
+
+    RECORD --> LLM{API key + model?}
+    LLM -- yes --> API["POST /api/extract-knowledge<br/>LLM buckets + dedupe vs existing"]
+    LLM -- no --> HEUR_URL[Heuristic fallback]
+
+    API --> PARSE[JSON: facts / intuitions / tricks]
+    PARSE --> EMPTY{All empty?}
+    EMPTY -- yes --> HEUR_URL
+    EMPTY -- no --> CAND
+
+    HEUR_URL --> HEUR[extractMathStatements<br/>buildIntuitionsFromExtracts<br/>extractTrickHintsFromText]
+    HEUR_UPLOAD --> HEUR2[Same heuristics on upload extracts]
+    HEUR --> CAND
+    HEUR2 --> CAND
+
+    CAND[Candidate lists<br/>client dedupeAgainstExisting] --> MODE{autoCommit?}
+
+    MODE -- explicit extract verb --> COMMIT[autoCommitProposals<br/>→ project.facts / .intuitions / .tricks]
+    MODE -- inspect only --> CARD[Proposal card<br/>user accepts per item]
+
+    COMMIT --> KB[(Project knowledge stores)]
+    CARD -- user accepts --> KB
+
+    subgraph buckets [Three buckets]
+        F[facts — theorem/lemma statements<br/>verification: lean | human | pending]
+        I[intuitions — strategy, motivation, heuristics]
+        T[tricks — induction, WLOG, telescoping, …]
+    end
+
+    KB --> F
+    KB --> I
+    KB --> T
+
+    classDef llm fill:#1e3a5f,stroke:#3b82f6,color:#dbeafe;
+    classDef tool fill:#3b2f1e,stroke:#f59e0b,color:#fde68a;
+    classDef store fill:#1e3b2f,stroke:#10b981,color:#a7f3d0;
+    classDef user fill:#1c1e26,stroke:#6366f1,color:#c7d2fe;
+    class API,PARSE llm;
+    class FETCH,HEUR,HEUR_URL,HEUR2,HEUR_UPLOAD tool;
+    class KB,F,I,T store;
+    class CARD,COMMIT user;

@@ -1,0 +1,4 @@
+{"id":"arithmetic-001","problem":"What is 17 modulo 5? Answer with only the number.","judge":"exact","expected":"2","tags":["arithmetic","smoke"]}
+{"id":"numeric-001","problem":"Compute 120% of 30 minus 130% of 20.","judge":"numeric","expected":10,"tolerance":1e-9,"tags":["arithmetic","smoke"]}
+{"id":"proof-001","problem":"Prove that the square root of 2 is irrational.","judge":"contains","expected":["irrational","contradiction"],"tags":["number-theory","proof"]}
+{"id":"formal-001","problem":"Formalize and prove in Lean 4 that True holds.","judge":"formal","require_formal_verification":true,"tags":["lean","smoke"]}
