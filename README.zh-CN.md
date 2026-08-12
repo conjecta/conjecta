@@ -1,5 +1,7 @@
 # Conjecta 数学智能体
 
+<img src="web/assets/logo.svg" alt="Conjecta" width="320">
+
 [English](README.md) | 简体中文
 
 项目官网：<https://conjecta.cn>

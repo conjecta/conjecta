@@ -1,5 +1,7 @@
 # Conjecta Math Agent
 
+<img src="web/assets/logo.svg" alt="Conjecta" width="320">
+
 English | [简体中文](README.zh-CN.md)
 
 Project website: <https://conjecta.cn>

@@ -1,8 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <rect width="64" height="64" rx="14" fill="#173a4a"/>
+  <!-- 证明对号: 验证通过, 尖端指向金色结论点 -->
   <path
-    d="M45.5 17.5c-3.5-3-7.8-4.5-12.8-4.5C21.8 13 14 21.2 14 32s7.8 19 18.7 19c5 0 9.3-1.5 12.8-4.5l-4.4-6.1a13.2 13.2 0 0 1-8.1 2.8c-6.3 0-10.8-4.7-10.8-11.2S26.7 20.8 33 20.8c3 0 5.7 1 8.1 2.8l4.4-6.1Z"
-    fill="#f0eee7"
+    d="M12 38c8 0 13-3 16-7 5-6 9-13 12-17 3 4 8 12 12 16"
+    fill="none"
+    stroke="#f0eee7"
+    stroke-width="6"
+    stroke-linecap="round"
+    stroke-linejoin="round"
   />
-  <circle cx="48" cy="32" r="4" fill="#d8ba7b"/>
+  <!-- 金色结论点: 对号确认它 -->
+  <circle cx="52" cy="27" r="7" fill="#d8ba7b"/>
 </svg>
