@@ -26,7 +26,7 @@ Conjecta 是一个带有明确资源边界和验证边界的数学推理智能�
 OpenAI-compatible 接口。处理 PDF 还需要 Poppler（Ubuntu 上安装 `poppler-utils`）。
 
 ```bash
-git clone https://github.com/crow-1412/conjecta-open-source-preview.git
+git clone https://github.com/conjecta/conjecta.git
 cd Conjecta-v0
 
 # 推荐：使用与 CI、生产部署一致的锁文件
