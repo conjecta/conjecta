@@ -28,7 +28,7 @@ that serves `gpt-5.6-sol`. PDF uploads also need Poppler (`pdfinfo` and
 `pdftoppm`); on Ubuntu install `poppler-utils`.
 
 ```bash
-git clone https://github.com/OWNER/REPOSITORY.git
+git clone https://github.com/crow-1412/conjecta-open-source-preview.git
 cd Conjecta-v0
 # Preferred: locked install via uv (CI and production use the same path)
 uv sync --frozen --extra dev
@@ -142,21 +142,47 @@ rows are answer-matched (see [Verification semantics](#verification-semantics)).
 | Putnam sample (tier5) | 20 | 10.0% (2/20) | **Lean verified** | 1202s / 107.2k tokens |
 | formal-hard (tier6, 7 cases x 3 trials) | 21 | 23.8% pass@1, 3/7 pass@3 | **Lean verified** | 1202s / 97.2k tokens |
 
-Notes:
+How to read the formal rows:
 
-- Harness-vs-raw ablation (same model, one raw completion each): fast ties
-  the raw model (100% vs 100%), AIME sample +8.0pp, miniF2F sample +16.7pp,
-  formal-hard 0/7 raw vs 3/7 harnessed — the harness lift grows with problem
-  difficulty. Full data in `docs/benchmark-results-2026-08.md`.
-- The miniF2F sample row aggregates three 10-problem chunks (50% / 90% / 60%);
-  run the full valid/test splits with `scripts/run_minif2f.sh`. A partial
-  full-valid run (stopped at 60/244 to redirect compute to ablations) scored
-  58.3% Lean-verified pass@1.
+- The miniF2F row is **pass@1 with a general-purpose model** — one agent solve
+  per problem at ~35k tokens median. Reference points for comparison are
+  specialist prover models reported at pass@32 with 32-8192x sampling:
+  Goedel-Prover-V2-32B 88.1%, Kimina-Prover-72B 84.0%,
+  DeepSeek-Prover-V2-671B 82.4%. At pass@1 the same specialist provers land
+  far below their pass@32 figures. A partial full-valid run (stopped at
+  60/244 to redirect compute to ablations) scored 58.3% Lean-verified pass@1,
+  with the hardest block (all 15 AIME problems) fully covered.
+- The Putnam and formal-hard rows are honest lower bounds: Putnam is the
+  hardest public formal benchmark, and most systems score near zero there.
 - `best_effort` rows are counted as incorrect even when the informal answer
   reads plausibly; only a successful Lean observation produces `verified`.
+- The miniF2F sample row aggregates three 10-problem chunks (50% / 90% / 60%);
+  run the full valid/test splits with `scripts/run_minif2f.sh`.
 - `aime_2025` and `hmmt_feb_2025` are excluded by default because they are
   CC-BY-NC-SA-4.0. See [benchmark artifacts](data/benchmarks/README.md) and
   [third-party notices](THIRD_PARTY_NOTICES.md) before generating them.
+
+### Harness ablation
+
+How much of the above is the model, and how much is the harness? Same model
+(`gpt-5.6-sol`), same problems, one raw completion each — no premise
+retrieval, no compile-feedback repair, no tools, no escalation — checked once
+with the strict verifier (`scripts/ablation_raw_oneshot.py`):
+
+| Set | Raw one-shot | Full harness | Lift |
+|---|---|---|---|
+| fast (tier1 basics, n=54) | 100%, 103 tok median | 100%, 3.3k tok median | **0pp (tie)** |
+| AIME sample (tier2, n=50) | 88.0%, 666 tok median | 96.0%, 18.1k tok median | **+8.0pp** |
+| **HMMT Feb 2025 FULL (n=20)** | **80.0–95.0%, two independent samples** | **100%** | **+5–20pp, variance eliminated** |
+| miniF2F sample (tier4, n=30) | 50.0%, 2.2k tok median | 66.7%, 35.1k tok median | **+16.7pp** |
+| formal-hard (tier6, n=7) | **0/7** | **3/7 (pass@3)** | **+3 problems from zero** |
+
+The lift grows monotonically with difficulty: on easy problems the raw
+frontier model is already saturated and the harness exactly ties it; from
+competition level up, the harness value concentrates where the model alone
+fails. Raw one-shot costs ~1.3k tokens per problem vs the harness's ~25k
+median — the 19x spend is the price of consistency. Details in
+`docs/benchmark-results-2026-08.md`.
 
 ## Browser authentication and memory trust
 
@@ -205,6 +231,25 @@ marked `running` are left for run recovery. On an existing deployment with a
 backlog, call the function repeatedly until it returns 0 rather than waiting
 for the nightly job to catch up one batch at a time.
 
+## Reliability engineering
+
+The 60-problem miniF2F full-run attempt doubled as a soak test and surfaced
+three production issues, all fixed with regression tests:
+
+1. **Gateway malformed bodies**: an OpenAI-compatible gateway intermittently
+   answers 200 with a plain-text/SSE body, which the SDK returns as a raw
+   `str`. Now classified as `MalformedResponseError` and retried with backoff
+   instead of crashing `complete()`.
+2. **REPL memory accumulation**: Lean REPL sessions grew RSS monotonically
+   with retained proof states until the cgroup OOM-killed them mid-search.
+   Fixed with proactive session recycling at pool checkin
+   (`repl_recycle_after_commands`) plus a circuit breaker that falls back to
+   batch compilation after repeated session deaths.
+3. **Deep-search routing reachability**: the deterministic deep-search gate
+   only counted one-shot `formalize`/`lean_check` failures, so rounds where
+   the actor jumped straight to structured tools never escalated. All four
+   Lean tools now count toward the trigger.
+
 ## Development and CI
 
 ```bash
@@ -241,6 +286,11 @@ See [`docs/research-mode.md`](docs/research-mode.md).
 For tool extension choices and the in-process registration API, see
 [`docs/tool-registration.md`](docs/tool-registration.md).
 
+Internal workflow diagrams (task routing, the Hermes loop, the pre-solve
+planner) are maintained under [`docs/internal/`](docs/internal/) for
+contributors; they document the team's operating procedures, not a public
+contract.
+
 ReAct checkpoints also persist a proof-goal DAG (root, active sub-goal,
 dependencies, attempts, issues, and accepted evidence). For substantial
 informal problems, `agent.conclusion_candidate_count = 3` enables bounded
@@ -260,6 +310,10 @@ a portable Lean source-safety scan. Generated frontend output is built in a
 temporary CI directory so tests do not dirty the checkout.
 
 ## Production deployment
+
+Optional features, not prerequisites: billing, phone authentication, and the
+Supabase multi-tenant migrations are only needed if you want those features.
+A single-user local installation works with no database at all.
 
 Read [SECURITY.md](SECURITY.md) first. The built-in execution restrictions are
 appropriate for trusted local use; hostile multi-tenant deployments require an

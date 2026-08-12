@@ -8,20 +8,20 @@ flowchart TD
     NEW --> ROUTE
     PROJ -- yes --> ROUTE{classifyTaskSkill}
 
-    ROUTE -- "read<br/>(extract / inspect URL)" --> READ[[READ skill<br/>docs/workflows/01-read-knowledge-lift.mmd]]
-    ROUTE -- explore --> EXPLORE[[EXPLORE skill<br/>docs/workflows/04-explore-skill.mmd]]
+    ROUTE -- "read<br/>(extract / inspect URL)" --> READ[[READ skill<br/>docs/internal/01-read-knowledge-lift.mmd]]
+    ROUTE -- explore --> EXPLORE[[EXPLORE skill<br/>docs/internal/04-explore-skill.mmd]]
     ROUTE -- prove<br/>default --> PROVE[[PROVE skill]]
 
-    PROVE --> PLANNER[[Pre-solve ReAct planner<br/>docs/workflows/03-pre-solve-planner.mmd]]
+    PROVE --> PLANNER[[Pre-solve ReAct planner<br/>docs/internal/03-pre-solve-planner.mmd]]
     PLANNER -- stop --> END1([Done — no full loop])
     PLANNER -- continue --> EXEC{decideExecutionPlan<br/>theorem / solve verb / auto?}
 
     EXEC -- no full loop --> END2([Captured — user must refine goal])
     EXEC -- full loop --> CONFIRM{Goal confirmation<br/>card}
     CONFIRM -- edit --> U
-    CONFIRM -- confirm --> HERMES[[Supervisor solve loop<br/>docs/workflows/02-hermes-loop.mmd]]
+    CONFIRM -- confirm --> HERMES[[Supervisor solve loop<br/>docs/internal/02-hermes-loop.mmd]]
 
-    HERMES --> POST[[Post-session<br/>docs/workflows/05-post-session.mmd]]
+    HERMES --> POST[[Post-session<br/>docs/internal/05-post-session.mmd]]
 
     classDef skill fill:#1c1e26,stroke:#6366f1,color:#c7d2fe;
     classDef gate fill:#3b2f1e,stroke:#f59e0b,color:#fde68a;

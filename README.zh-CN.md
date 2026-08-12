@@ -13,7 +13,7 @@ Conjecta 是一个带有明确资源边界和验证边界的数学推理智能�
 ## 主要特性
 
 - 单一生产求解引擎，避免多套历史流程产生不一致行为；
-- 主模型固定为 `openai/gpt-5.6-sol`，通过 OpenAI-compatible `base_url` 接入；
+- 公开 Web/API 只接受 `openai/gpt-5.6-sol`，通过 OpenAI-compatible `base_url` 接入；CLI 可配置其他兼容模型；
 - Lean 4 / mathlib4 形式化验证，并区分 `verified`、`reviewed` 和 `best_effort`；
 - 有界的规划、工具调用、审阅、失败修复和形式化升级预算；
 - 支持知识库、用户记忆、项目存储、checkpoint 和证明轨迹；
@@ -26,7 +26,7 @@ Conjecta 是一个带有明确资源边界和验证边界的数学推理智能�
 OpenAI-compatible 接口。处理 PDF 还需要 Poppler（Ubuntu 上安装 `poppler-utils`）。
 
 ```bash
-git clone https://github.com/OWNER/REPOSITORY.git
+git clone https://github.com/crow-1412/conjecta-open-source-preview.git
 cd Conjecta-v0
 
 # 推荐：使用与 CI、生产部署一致的锁文件
@@ -125,13 +125,28 @@ UI 必须保留这些区别，不得把 `reviewed` 或 `best_effort` 展示为�
 | Putnam sample（tier5） | 20 | 10.0%（2/20） | **Lean 验证** | 1202 秒 / 107.2k tokens |
 | formal-hard（7 题 × 3 次） | 21 | 23.8% pass@1，3/7 pass@3 | **Lean 验证** | 1202 秒 / 97.2k tokens |
 
-`best_effort` 即使文本答案看起来合理，也按错误计算；只有成功的 Lean 观察才能产生
-`verified`。完整实验说明和消融结果见
-[docs/benchmark-results-2026-08.md](docs/benchmark-results-2026-08.md)。
+如何解读形式化验证行：
 
-部分数据集带有非商业或相同方式共享条款，默认不会生成。使用前请阅读
-[基准数据说明](data/benchmarks/README.md)和
-[第三方声明](THIRD_PARTY_NOTICES.md)。
+- miniF2F 行是**通用模型的 pass@1**——每个问题一次智能体求解，中位约 35k tokens。对比参考点是按 pass@32、每问题 32-8192 次采样报告的专用证明器模型：Goedel-Prover-V2-32B 88.1%、Kimina-Prover-72B 84.0%、DeepSeek-Prover-V2-671B 82.4%；这些专用证明器在 pass@1 下远低于其 pass@32 数字。一次部分全集 valid 运行（在 60/244 处停止以把算力转向消融实验）得到 58.3% Lean 验证 pass@1，其中最难的一批（valid 中全部 15 道 AIME 题）已完全覆盖。
+- Putnam 和 formal-hard 行是诚实的下界：Putnam 是最难的公开形式化基准，多数系统在此接近 0。
+- `best_effort` 即使文本答案看起来合理，也按错误计算；只有成功的 Lean 观察才能产生 `verified`。
+- miniF2F 样本行由三个 10 题片段（50% / 90% / 60%）汇总；完整 valid/test 拆分可用 `scripts/run_minif2f.sh` 运行。
+- `aime_2025` 和 `hmmt_feb_2025` 默认不生成，因为它们是 CC-BY-NC-SA-4.0。生成前请阅读[基准数据说明](data/benchmarks/README.md)和[第三方声明](THIRD_PARTY_NOTICES.md)。
+
+### 消融实验：harness 的贡献
+
+上面的成绩有多少来自模型、多少来自 harness？同一模型（`gpt-5.6-sol`）、同一批题目、每次一个裸补全——没有前提检索、没有编译反馈修复、没有工具、没有升级——用严格验证器检查一次（`scripts/ablation_raw_oneshot.py`）：
+
+| 测试集 | 裸模型单次 | 完整 harness | 提升 |
+|---|---|---|---|
+| fast（tier1 基础，n=54） | 100%，中位 103 tok | 100%，中位 3.3k tok | **0pp（持平）** |
+| AIME sample（tier2，n=50） | 88.0%，中位 666 tok | 96.0%，中位 18.1k tok | **+8.0pp** |
+| **HMMT 2025-02 全集（n=20）** | **80.0–95.0%，两次独立采样** | **100%** | **+5–20pp，方差消除** |
+| miniF2F sample（tier4，n=30） | 50.0%，中位 2.2k tok | 66.7%，中位 35.1k tok | **+16.7pp** |
+| formal-hard（tier6，n=7） | **0/7** | **3/7（pass@3）** | **从零到 3 题** |
+
+提升随难度单调增长：简单题上裸模型已饱和，harness 正好持平；从竞赛难度起，harness 的价值集中在模型单靠自身失败的地方。裸模型单次每题约 1.3k tokens，harness 中位约 25k——19 倍的成本是换取一致性的代价。完整数据见
+`docs/benchmark-results-2026-08.md`。
 
 ## 浏览器认证与记忆信任
 
@@ -161,6 +176,14 @@ candidate -> approved | reviewed | verified | rejected
 
 保留策略迁移是唯一会在之后定期删除旧遥测数据的迁移；应用迁移本身不会立即删除数据。完整约束见英文 README 和对应 SQL 文件。
 
+## 可靠性工程
+
+60 题的 miniF2F 全集试运行同时充当了浸泡测试，暴露了三个生产问题，均已修复并附带回归测试：
+
+1. **网关畸形响应**：某个 OpenAI 兼容网关偶尔以纯文本/SSE 形式返回 200，SDK 将其作为原始 `str` 返回。现在归类为 `MalformedResponseError` 并用退避重试，而不是让 `complete()` 崩溃。
+2. **REPL 内存累积**：Lean REPL 会话随保留的证明状态单调增长 RSS，直到 cgroup OOM 在搜索中途将其杀死。通过在池回收时主动回收会话（`repl_recycle_after_commands`）加一个在反复会话死亡后回退到批量编译的熔断器修复。
+3. **深度搜索路由不可达**：确定性深度搜索闸门只统计一次性 `formalize`/`lean_check` 失败，导致 actor 直接跳到结构化工具的轮次从不升级。现在所有四个 Lean 工具都计入触发条件。
+
 ## 开发与 CI
 
 ```bash
@@ -186,7 +209,11 @@ uv run python scripts/evaluate_math_agent.py \
 
 GitHub Actions 会运行 Python 3.10/3.11 测试、Ruff、mypy、依赖审计、wheel 检查、完整前端门禁，以及不依赖本地 Lean 安装的源码安全扫描。真正的 Lean 集成测试位于独立 workflow 中。
 
+内部工作流图（任务路由、Hermes 循环、pre-solve planner）维护在 [`docs/internal/`](docs/internal/) 供贡献者使用；它们描述的是团队的作业流程，不是对外契约。
+
 ## 生产部署
+
+可选功能，不是前置条件：计费、手机号认证和 Supabase 多租户迁移只在需要这些功能时才用得上。单机本地安装可以完全不用数据库。
 
 部署前先阅读 [SECURITY.md](SECURITY.md)。内置执行限制适用于可信本地环境；面向不可信多租户时，必须增加外部容器或等效隔离，以及经过审阅的出站网络策略。
 
