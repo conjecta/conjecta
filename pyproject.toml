@@ -6,9 +6,6 @@ readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
 
-[project.urls]
-Homepage = "https://conjecta.cn"
-
 dependencies = [
     "openai>=1.50.0",
     "sympy>=1.13.0",
@@ -32,6 +29,9 @@ dependencies = [
     "tiktoken>=0.7.0",
     "matplotlib>=3.8.0",
 ]
+
+[project.urls]
+Homepage = "https://conjecta.cn"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.24.0", "ruff>=0.6", "mypy>=1.10", "pip-audit>=2.7"]
