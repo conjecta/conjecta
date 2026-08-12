@@ -16,7 +16,8 @@ OlympiadBench, miniF2F, PutnamBench, Compfiles, and CombiBench. Generated files
 retain their upstream terms.
 
 The default build excludes sources marked `CC-BY-NC-SA-4.0`. Passing
-`--include-noncommercial` opts into those sources for non-commercial use and
-does not relicense them under MIT. Review the generated
+`--include-noncommercial` opts into those sources for non-commercial use only;
+the AGPL-3.0 license of this repository does not cover third-party benchmark
+data, and generated files retain their upstream terms. Review the generated
 `data/benchmarks/manifest.json` before redistribution, training, or commercial
 use.

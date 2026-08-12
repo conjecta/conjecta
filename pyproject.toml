@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Math research agent with Lean 4 verification"
 readme = "README.md"
 license = { file = "LICENSE" }
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 
 dependencies = [

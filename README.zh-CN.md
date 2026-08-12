@@ -231,5 +231,7 @@ GitHub Actions 会运行 Python 3.10/3.11 测试、Ruff、mypy、依赖审计、
 
 ## 许可证
 
-原创代码和文档使用 MIT 许可证，见 [LICENSE](LICENSE)。可选第三方数据和打包的前端依赖继续适用各自的许可证与条款，见
+原创代码和文档采用 **GNU Affero General Public License v3.0**，见 [LICENSE](LICENSE)。如果你修改 Conjecta 并作为网络服务运行，AGPL 要求你把修改后的源码提供给该服务的用户。
+
+可选第三方数据和打包的前端依赖继续适用各自的许可证与条款，见
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

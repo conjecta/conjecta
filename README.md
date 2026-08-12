@@ -375,6 +375,10 @@ Logs are written to `logs/math-agent.log` and `logs/sessions/`.
 
 ## License
 
-Original code and documentation are MIT licensed; see [LICENSE](LICENSE).
-Optional third-party data and bundled frontend dependencies retain their own
-terms; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Original code and documentation are licensed under the
+**GNU Affero General Public License v3.0**; see [LICENSE](LICENSE). If you
+modify Conjecta and run it as a network service, the AGPL requires you to
+make your modified source code available to the users of that service.
+
+Optional third-party data and bundled frontend dependencies retain their
+own terms; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
