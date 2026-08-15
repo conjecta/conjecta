@@ -49,13 +49,6 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("math_agent.tools")
 
-_LOG_PREVIEW = 500
-
-# SENSITIVE: enables DEBUG logs containing raw tool args/output previews.
-# These can leak user problems, private materials, URLs, and DB/MCP returns,
-# so this must stay False in production.
-_DEBUG_TOOL_PAYLOAD_LOGS = False
-
 
 _BUILTIN_ARG_MAPS: dict[str, ToolArgMap] = {
     "compute": "code",
@@ -622,17 +615,10 @@ class ToolRegistry:
         if fn is None:
             log.warning("Unknown tool requested: %s", name)
             return ToolResult(name=name, output=f"Unknown tool: {name}", success=False)
-        # Structured metadata only at INFO: tool payloads may contain user
-        # problems and private data, so raw args/output are logged solely at
-        # DEBUG behind _DEBUG_TOOL_PAYLOAD_LOGS.
-        log.info(
-            "Tool call start: name=%s arg_keys=%s arg_chars=%d",
-            name,
-            self._argument_keys(args),
-            len(args),
-        )
-        if _DEBUG_TOOL_PAYLOAD_LOGS:
-            log.debug("Tool call args: name=%s args=%s", name, args[:_LOG_PREVIEW])
+        # Structured metadata only: tool payloads may contain user problems
+        # and private data, so nothing derived from args/output is ever
+        # logged (CodeQL py/clear-text-logging).
+        log.info("Tool call start: name=%s", name)
         tool_ctx = self._context_with_defaults(ctx)
         started = time.monotonic()
         failed = False
@@ -647,12 +633,6 @@ class ToolRegistry:
                 elapsed_ms,
                 len(result.output),
             )
-            if _DEBUG_TOOL_PAYLOAD_LOGS:
-                log.debug(
-                    "Tool call output: name=%s output=%s",
-                    name,
-                    result.output[:_LOG_PREVIEW],
-                )
             return result
         except Exception:
             failed = True
@@ -674,17 +654,6 @@ class ToolRegistry:
             stats["calls"] += 1
             stats["failures"] += 1 if failed else 0
             stats["wall_seconds"] = round(stats["wall_seconds"] + elapsed, 6)
-
-    @staticmethod
-    def _argument_keys(args: str) -> list[str]:
-        """Sorted top-level argument keys for structured logs (no values)."""
-        try:
-            parsed = json.loads(args)
-        except (TypeError, ValueError):
-            return []
-        if isinstance(parsed, dict):
-            return sorted(str(key) for key in parsed)
-        return []
 
     @property
     def tool_stats(self) -> dict[str, dict[str, Any]]:

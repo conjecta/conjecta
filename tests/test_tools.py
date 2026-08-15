@@ -547,7 +547,9 @@ async def test_call_info_logs_do_not_leak_raw_args(caplog):
     ]
     assert info_messages
     assert all(secret_payload not in message for message in info_messages)
-    assert any("arg_keys=['value']" in message for message in info_messages)
+    # Nothing derived from the args payload (keys or values) may be logged.
+    assert all("arg_keys" not in message for message in info_messages)
+    assert any("Tool call start: name=echo" in message for message in info_messages)
 
 
 @pytest.mark.asyncio

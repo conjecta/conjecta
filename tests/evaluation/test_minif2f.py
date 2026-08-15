@@ -59,7 +59,13 @@ def test_extract_statement_rejects_garbage():
         minif2f.extract_statement("theorem foo : True := by trivial")
 
 
+def _require_mathlib_tree() -> None:
+    if not minif2f.mathlib_package_dir().is_dir():
+        pytest.skip("mathlib4 package tree not present (run math-agent-lean-setup)")
+
+
 def test_existing_imports_filters_missing_modules():
+    _require_mathlib_tree()
     kept = minif2f.existing_imports(
         ["Mathlib.Data.Real.Basic", "Mathlib.No.Such.Module", "Batteries.Whatever"]
     )
@@ -67,6 +73,7 @@ def test_existing_imports_filters_missing_modules():
 
 
 def test_standard_imports_exist_and_are_not_umbrella():
+    _require_mathlib_tree()
     standard = minif2f.existing_imports(list(minif2f.STANDARD_IMPORTS))
     assert standard == list(minif2f.STANDARD_IMPORTS)
     assert "Mathlib" not in standard  # umbrella import is forbidden
@@ -74,6 +81,7 @@ def test_standard_imports_exist_and_are_not_umbrella():
 
 
 def test_render_problem_embeds_statement_with_precise_imports():
+    _require_mathlib_tree()
     imports = minif2f.existing_imports(list(minif2f.STANDARD_IMPORTS))
     problem = minif2f.render_problem(
         "Formalize and prove in Lean 4: ... Show that it is 0.",
@@ -115,6 +123,7 @@ def test_build_rows_schema():
 
 def test_verify_statements_batching_and_fallback(monkeypatch):
     """Elaboration outcomes drive import assignment without running Lean."""
+    _require_mathlib_tree()
     statements = [
         minif2f.Statement("good_one", "valid", "theorem good_one : True"),
         minif2f.Statement("bad_one", "valid", "theorem bad_one : True"),
