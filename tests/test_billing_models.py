@@ -29,9 +29,12 @@ def test_usage_record_dataclass() -> None:
 
 
 def test_stored_api_key_dataclass() -> None:
-    key = StoredApiKey(provider="openai", api_key="sk-secret")
-    assert key.provider == "openai"
+    key = StoredApiKey(
+        api_key="sk-secret", base_url="https://api.example.com/v1"
+    )
     assert key.api_key == "sk-secret"
+    assert key.base_url == "https://api.example.com/v1"
+    assert key.legacy_provider == ""
 
 
 def test_dataclasses_are_frozen() -> None:

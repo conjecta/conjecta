@@ -32,7 +32,9 @@ async def _fake_load_no_user_api_key(_uid):
 
 
 async def _fake_load_user_api_key(_uid):
-    return StoredApiKey(provider="openai", api_key="sk-test")
+    return StoredApiKey(
+        api_key="sk-test", base_url="https://api.example.com/v1"
+    )
 
 
 async def _fake_stream_solve_events(_msg, *, user_id=None):
@@ -46,8 +48,8 @@ async def _fake_stream_solve_events(_msg, *, user_id=None):
                 total_tokens=15,
             )
         )
-        usage.provider = "openai"
-        usage.model = "gpt-5.6-sol"
+        usage.provider = "shengsuanyun"
+        usage.model = "openai/gpt-5.5"
     yield {"type": "done", "final_answer": "2"}
 
 
@@ -115,8 +117,8 @@ def test_solve_records_platform_usage(monkeypatch):
     assert recorded["usage"].prompt_tokens == 10
     assert recorded["usage"].completion_tokens == 5
     assert recorded["usage"].total_tokens == 15
-    assert recorded["usage"].provider == "openai"
-    assert recorded["usage"].model == "gpt-5.6-sol"
+    assert recorded["usage"].provider == "shengsuanyun"
+    assert recorded["usage"].model == "openai/gpt-5.5"
     assert recorded["usage"].cost_usd > 0
 
 
@@ -219,7 +221,7 @@ def test_solve_unlimited_quota_phone_skips_limit(monkeypatch):
     )
     monkeypatch.delenv("CONJECTA_ALLOW_UNAUTHENTICATED", raising=False)
     _enable_quota_tracking(monkeypatch)
-    monkeypatch.setenv("CONJECTA_UNLIMITED_QUOTA_PHONES", "13800000001")
+    monkeypatch.setenv("CONJECTA_UNLIMITED_QUOTA_PHONES", "15721590518")
     clear_unlimited_quota_cache()
 
     fake_store = _FakeUsageStore(daily_total=500_000)
@@ -231,7 +233,7 @@ def test_solve_unlimited_quota_phone_skips_limit(monkeypatch):
         "math_agent.web.solve_routes.stream_solve_events", _fake_stream_solve_events
     )
 
-    token, _user, _ttl = issue_access_token("13800000001")
+    token, _user, _ttl = issue_access_token("15721590518")
     resp = client.post(
         "/api/solve/stream",
         json={"problem": "1+1"},

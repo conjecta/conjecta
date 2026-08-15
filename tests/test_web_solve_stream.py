@@ -60,7 +60,7 @@ def _patch_solve_dependencies(
             return []
 
     monkeypatch.setattr(agent_factory, "_project_store", lambda user_id=None: _EmptyStore())
-    monkeypatch.setattr(agent_factory, "default_model_string", lambda config: "openai/gpt-5.6-sol")
+    monkeypatch.setattr(agent_factory, "default_model_string", lambda config: "openai/test")
     monkeypatch.setattr(agent_factory, "prefix_history", lambda problem, history: problem)
 
     def persist_pending_turn(store, project_id, problem, files, *, conversation_id=""):

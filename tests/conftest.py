@@ -10,6 +10,7 @@ _SENSITIVE_VARS = [
     # LLM providers
     "DEEPSEEK_API_KEY",
     "OPENAI_API_KEY",
+    "SHENGSUANYUN_API_KEY",
     # Search / embeddings
     "TAVILY_API_KEY",
     # Supabase

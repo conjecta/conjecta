@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from typing import Any, AsyncIterator
 
 from fastapi import APIRouter, HTTPException, Request
@@ -18,7 +19,6 @@ from math_agent.web.agent_factory import (
     _maybe_knowledge_store,
     _material_store,
     _platform_api_key,
-    _platform_base_url,
     _project_access_from_request,
     _project_store,
     _resolve_platform_model,
@@ -133,9 +133,7 @@ async def extract_knowledge(payload: dict[str, Any], request: Request):
         "tricks": short_knowledge_texts(existing_tricks),
     }
 
-    llm = create_backend_from_model_string(
-        model, temperature=0.0, api_key=api_key, base_url=_platform_base_url(model)
-    )
+    llm = create_backend_from_model_string(model, temperature=0.0, api_key=api_key)
     system = (
         "You are a math-research knowledge extractor for Conjecta.\n"
         "Given a source text (excerpt of an article, paper, or lecture), extract candidate items in three buckets:\n"
@@ -283,14 +281,16 @@ async def translate_knowledge(payload: dict[str, Any], request: Request):
     if saved is not None:
         return {"ok": True, "translation": saved, "cached": True}
 
-    model = "openai/gpt-5.6-sol"
+    model = os.getenv(
+        "CONJECTA_TRANSLATION_MODEL",
+        "shengsuanyun/openai/gpt-5.4-mini",
+    ).strip()
     try:
         llm = create_backend_from_model_string(
             model,
             temperature=0.0,
             api_key=_platform_api_key(model),
             timeout_seconds=60.0,
-            base_url=_platform_base_url(model),
         )
         translated = await translate_knowledge_item(llm, item, kind)
         if hasattr(store, "update_item"):
@@ -451,8 +451,10 @@ async def explore_knowledge_graph(payload: dict[str, Any], request: Request):
     user = require_auth_user(request)
     project_id = (payload.get("project_id") or "default").strip()
     focus = (payload.get("focus") or "").strip()
-    model = _resolve_platform_model(payload.get("model"), default_to_config=True)
+    model = payload.get("model")
     api_key = _platform_api_key(model)
+    if not model:
+        return {"ok": False, "error": "Model is required."}
 
     project_store = _project_store(user.user_id)
     knowledge_store = _maybe_knowledge_store(user.user_id) or project_store
@@ -481,9 +483,7 @@ async def explore_knowledge_graph(payload: dict[str, Any], request: Request):
     if len(catalog) < 2:
         return current
 
-    llm = create_backend_from_model_string(
-        model, temperature=0.1, api_key=api_key, base_url=_platform_base_url(model)
-    )
+    llm = create_backend_from_model_string(model, temperature=0.1, api_key=api_key)
     system = (
         "You are building a knowledge graph for Conjecta, a math research workbench.\n"
         "Given project knowledge nodes, propose only high-confidence relationships between existing node ids.\n"
@@ -544,14 +544,14 @@ async def next_steps(payload: dict[str, Any], request: Request):
     summary = (payload.get("summary") or "").strip()
     steps_summary = payload.get("steps_summary") or []
     project_snapshot = payload.get("project_snapshot") or {}
-    model = _resolve_platform_model(payload.get("model"), default_to_config=True)
+    model = payload.get("model")
     api_key = _platform_api_key(model)
     if not problem and not summary:
         return {"ok": False, "error": "No session context provided."}
+    if not model:
+        return {"ok": False, "error": "Model is required."}
 
-    llm = create_backend_from_model_string(
-        model, temperature=0.2, api_key=api_key, base_url=_platform_base_url(model)
-    )
+    llm = create_backend_from_model_string(model, temperature=0.2, api_key=api_key)
     system = (
         "You are the post-session advisor for Conjecta, a math research assistant.\n"
         "After a solve completes, suggest 2 to 4 concrete actionable next steps the user could take.\n"
@@ -620,8 +620,10 @@ async def explore_knowledge(payload: dict[str, Any], request: Request):
     facts = payload.get("facts") or []
     intuitions = payload.get("intuitions") or []
     tricks = payload.get("tricks") or []
-    model = _resolve_platform_model(payload.get("model"), default_to_config=True)
+    model = payload.get("model")
     api_key = _platform_api_key(model)
+    if not model:
+        return {"ok": False, "error": "Model is required."}
     if not (facts or intuitions or tricks):
         return {
             "ok": True,
@@ -638,9 +640,7 @@ async def explore_knowledge(payload: dict[str, Any], request: Request):
         "tricks": short_knowledge_rows(tricks),
     }
 
-    llm = create_backend_from_model_string(
-        model, temperature=0.3, api_key=api_key, base_url=_platform_base_url(model)
-    )
+    llm = create_backend_from_model_string(model, temperature=0.3, api_key=api_key)
     system = (
         "You are the explore-mode synthesizer for Conjecta, a math research assistant.\n"
         "Given the user's project knowledge (facts, intuitions, tricks) plus an optional focus,\n"
@@ -704,7 +704,7 @@ async def _knowledge_selection_events(
     facts_in = payload.get("facts")
     intuitions_in = payload.get("intuitions")
     tricks_in = payload.get("tricks")
-    model = _resolve_platform_model(payload.get("model"), default_to_config=True)
+    model = payload.get("model")
     api_key = _platform_api_key(model)
 
     # Fall back to JSONL-backed project knowledge when explicit lists are not provided.
@@ -731,6 +731,9 @@ async def _knowledge_selection_events(
     if not problem:
         yield {"type": "error", "message": "No prompt provided."}
         return
+    if not model:
+        yield {"type": "error", "message": "Model is required."}
+        return
 
     fact_catalog, intuition_catalog, trick_catalog = _build_knowledge_catalogs(
         facts_in,
@@ -752,9 +755,7 @@ async def _knowledge_selection_events(
         return
 
     history_blob = _normalize_conversation_history(conversation_history)
-    llm = create_backend_from_model_string(
-        model, temperature=0.0, api_key=api_key, base_url=_platform_base_url(model)
-    )
+    llm = create_backend_from_model_string(model, temperature=0.0, api_key=api_key)
 
     yield {"type": "phase_start", "phase": "prepare", "label": "Prepare context"}
 
@@ -888,10 +889,9 @@ async def select_knowledge_stream(payload: dict[str, Any], request: Request):
     _check_request_body_size(request)
     user = require_auth_user(request)
     try:
-        model = _resolve_platform_model(payload.get("model"), default_to_config=True)
+        _resolve_platform_model(payload.get("model"), default_to_config=True)
     except HTTPException as exc:
         return JSONResponse({"ok": False, "error": exc.detail}, status_code=exc.status_code)
-    payload = {**payload, "model": model}
 
     async def event_stream() -> AsyncIterator[str]:
         events = _knowledge_selection_events(payload, user_id=user.user_id)
@@ -910,10 +910,9 @@ async def select_knowledge(payload: dict[str, Any], request: Request):
     _check_request_body_size(request)
     user = require_auth_user(request)
     try:
-        model = _resolve_platform_model(payload.get("model"), default_to_config=True)
+        _resolve_platform_model(payload.get("model"), default_to_config=True)
     except HTTPException as exc:
         return JSONResponse({"ok": False, "error": exc.detail}, status_code=exc.status_code)
-    payload = {**payload, "model": model}
 
     events = _knowledge_selection_events(payload, user_id=user.user_id)
     try:
@@ -1038,11 +1037,14 @@ async def _evaluate_satisfaction_events(payload: dict[str, Any]) -> AsyncIterato
     intuitions_in = payload.get("intuitions") or []
     tricks_in = payload.get("tricks") or []
     materials_in = payload.get("materials") or []
-    model = _resolve_platform_model(payload.get("model"), default_to_config=True)
+    model = payload.get("model")
     api_key = _platform_api_key(model)
 
     if not problem:
         yield {"type": "error", "message": "No prompt provided."}
+        return
+    if not model:
+        yield {"type": "error", "message": "Model is required."}
         return
     if not conversation_history:
         yield {"type": "done", "ok": True, "message": "", "actions": {}}
@@ -1050,9 +1052,7 @@ async def _evaluate_satisfaction_events(payload: dict[str, Any]) -> AsyncIterato
 
     history_blob = _normalize_conversation_history(conversation_history)
     snapshot = _knowledge_snapshot(facts_in, intuitions_in, tricks_in, materials_in)
-    llm = create_backend_from_model_string(
-        model, temperature=0.2, api_key=api_key, base_url=_platform_base_url(model)
-    )
+    llm = create_backend_from_model_string(model, temperature=0.2, api_key=api_key)
 
     system = (
         "You are the session-satisfaction evaluator for Conjecta, a math research assistant.\n"
@@ -1132,8 +1132,6 @@ async def _evaluate_satisfaction_events(payload: dict[str, Any]) -> AsyncIterato
 @router.post("/evaluate-satisfaction/stream")
 async def evaluate_satisfaction_stream(payload: dict[str, Any], request: Request):
     require_auth_user(request)
-    model = _resolve_platform_model(payload.get("model"), default_to_config=True)
-    payload = {**payload, "model": model}
 
     async def event_stream() -> AsyncIterator[str]:
         async for event in _evaluate_satisfaction_events(payload):
@@ -1152,8 +1150,10 @@ async def review_materials(payload: dict[str, Any], request: Request):
     facts = payload.get("facts") or []
     intuitions = payload.get("intuitions") or []
     tricks = payload.get("tricks") or []
-    model = _resolve_platform_model(payload.get("model"), default_to_config=True)
+    model = payload.get("model")
     api_key = _platform_api_key(model)
+    if not model:
+        return {"ok": False, "error": "Model is required."}
     if not isinstance(candidates, list) or not candidates:
         return {"ok": True, "verdicts": []}
 
@@ -1191,9 +1191,7 @@ async def review_materials(payload: dict[str, Any], request: Request):
         },
     }
 
-    llm = create_backend_from_model_string(
-        model, temperature=0.1, api_key=api_key, base_url=_platform_base_url(model)
-    )
+    llm = create_backend_from_model_string(model, temperature=0.1, api_key=api_key)
     system = (
         "You are the reviewer agent for Conjecta, a math research assistant.\n"
         "For each candidate material, decide whether it should be promoted to the project's main\n"

@@ -10,11 +10,10 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from math_agent.billing.models import StoredApiKey
 
-USER_MODEL_MAP: dict[str, str] = {
-    "openai": "gpt-5.6-sol",
-}
-
-_FORMAT_VERSION = "v1"
+USER_API_MODEL = "gpt-5.6-sol"
+USER_API_PROVIDER = "user_endpoint"
+_FORMAT_VERSION = "v2"
+_LEGACY_FORMAT_VERSION = "v1"
 
 
 def _encryption_key() -> bytes:
@@ -27,8 +26,8 @@ def _encryption_key() -> bytes:
     return key
 
 
-def encrypt_api_key(provider: str, api_key: str) -> str:
-    payload = json.dumps({"provider": provider, "api_key": api_key}).encode()
+def encrypt_api_key(base_url: str, api_key: str) -> str:
+    payload = json.dumps({"base_url": base_url, "api_key": api_key}).encode()
     key = _encryption_key()
     nonce = secrets.token_bytes(12)
     ciphertext = AESGCM(key).encrypt(nonce, payload, None)
@@ -39,7 +38,7 @@ def encrypt_api_key(provider: str, api_key: str) -> str:
 
 def decrypt_api_key(ciphertext: str) -> StoredApiKey:
     parts = ciphertext.split(":")
-    if len(parts) != 3 or parts[0] != _FORMAT_VERSION:
+    if len(parts) != 3 or parts[0] not in {_FORMAT_VERSION, _LEGACY_FORMAT_VERSION}:
         raise ValueError("Unsupported ciphertext format")
     nonce = base64.urlsafe_b64decode(parts[1].encode())
     ct = base64.urlsafe_b64decode(parts[2].encode())
@@ -49,10 +48,15 @@ def decrypt_api_key(ciphertext: str) -> StoredApiKey:
     except InvalidTag as exc:
         raise ValueError("Ciphertext authentication failed") from exc
     data = json.loads(payload)
-    return StoredApiKey(provider=data["provider"], api_key=data["api_key"])
-
-
-def get_user_backend_model(provider: str) -> str:
-    if provider not in USER_MODEL_MAP:
-        raise ValueError(f"Unsupported provider: {provider}")
-    return USER_MODEL_MAP[provider]
+    api_key = data.get("api_key")
+    if not isinstance(api_key, str) or not api_key:
+        raise ValueError("Encrypted API key payload is invalid")
+    if parts[0] == _LEGACY_FORMAT_VERSION:
+        provider = data.get("provider")
+        if not isinstance(provider, str) or not provider:
+            raise ValueError("Legacy API key payload is invalid")
+        return StoredApiKey(api_key=api_key, legacy_provider=provider)
+    base_url = data.get("base_url")
+    if not isinstance(base_url, str) or not base_url:
+        raise ValueError("Encrypted API key payload is invalid")
+    return StoredApiKey(api_key=api_key, base_url=base_url)

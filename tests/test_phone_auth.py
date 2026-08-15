@@ -132,7 +132,7 @@ def test_logout_clears_cookie(auth_env, monkeypatch):
 
 def test_sms_bypass_phone_logs_in_without_code(auth_env, monkeypatch):
     phone_auth.clear_sms_bypass_cache()
-    monkeypatch.setenv("CONJECTA_SMS_BYPASS_PHONES", "13800000001")
+    monkeypatch.setenv("CONJECTA_SMS_BYPASS_PHONES", "15721590518")
     phone_auth.clear_sms_bypass_cache()
 
     sent: list[str] = []
@@ -150,7 +150,7 @@ def test_sms_bypass_phone_logs_in_without_code(auth_env, monkeypatch):
         "math_agent.knowledge.supabase_client.service_role_configured", lambda: False
     )
 
-    send = auth_env.post("/api/auth/send-code", json={"phone": "13800000001"})
+    send = auth_env.post("/api/auth/send-code", json={"phone": "15721590518"})
     assert send.status_code == 200
     send_data = send.json()
     assert send_data["sms_bypass"] is True
@@ -160,11 +160,11 @@ def test_sms_bypass_phone_logs_in_without_code(auth_env, monkeypatch):
 
     me = auth_env.get("/api/auth/me")
     assert me.status_code == 200
-    assert me.json()["user"]["phone"] == "138****0001"
+    assert me.json()["user"]["phone"] == "157****0518"
 
     verify = auth_env.post(
         "/api/auth/verify-code",
-        json={"phone": "13800000001", "code": "0000"},
+        json={"phone": "15721590518", "code": "0000"},
     )
     assert verify.status_code == 200
     assert verify.json()["sms_bypass"] is True

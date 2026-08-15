@@ -4,17 +4,31 @@ A looser sibling of ``python_sandbox.run_python``: user code may import
 matplotlib/numpy and build figures with ``matplotlib.pyplot``.  The code must
 NOT call ``savefig``/``show`` — the child runner saves every open figure into
 ``out_dir`` itself, which keeps all file writes confined to that directory.
+
+Security model: the AST validation below is a first-layer UX / early-error
+check only — it is NOT the security boundary (allowed native extensions such
+as numpy/matplotlib make static checks bypassable in principle).  The
+boundary is bubblewrap isolation via
+:mod:`math_agent.tools.isolated_runner`, applied when
+``CONJECTA_SANDBOX_ISOLATION`` is ``bwrap``, or ``auto`` with bwrap
+installed; under isolation only ``out_dir`` is writable and the child has no
+network.  When bwrap is unavailable the child runs with rlimits + AST checks
+only and a WARNING is logged once; treat that fallback as defense-in-depth,
+not isolation.  See SECURITY.md.
 """
 from __future__ import annotations
 
 import ast
 import asyncio
+import contextlib
 import json
 import os
 import sys
 import textwrap
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from math_agent.tools import isolated_runner
 
 _MAX_CODE_CHARS = 16_384
 _MAX_OUTPUT_CHARS = 32_768
@@ -326,7 +340,10 @@ async def run_plot(
     """Run matplotlib code in a short-lived restricted subprocess.
 
     Every figure left open by the code is saved as ``fig-<n>.png`` inside
-    ``out_dir``; the returned ``figures`` lists the saved file names.
+    ``out_dir``; the returned ``figures`` lists the saved file names.  The
+    child is wrapped in bwrap (no network, only ``out_dir`` writable) when
+    isolation is active; otherwise it runs with rlimits + AST checks only
+    and a warning is logged once.
     """
     err = _validate_code(code)
     if err is not None:
@@ -339,22 +356,35 @@ async def run_plot(
 
     runner = _child_runner_source(code.strip(), str(out_dir.resolve()))
 
+    argv = [sys.executable, "-c", runner]
+    env: dict[str, str] | None = {
+        "PATH": os.environ.get("PATH", ""),
+        "PYTHONPATH": "",
+        "HOME": os.environ.get("HOME", "/tmp"),
+        "LANG": os.environ.get("LANG", "C.UTF-8"),
+        "MPLCONFIGDIR": str(mpl_config.resolve()),
+    }
+    if isolated_runner.isolation_active():
+        # bwrap controls the child env via --clearenv/--setenv; out_dir is
+        # the only writable path.
+        argv = isolated_runner.build_bwrap_argv(
+            argv=argv,
+            writable_dirs=[out_dir.resolve()],
+            workdir=out_dir.resolve(),
+            extra_env={"MPLCONFIGDIR": str(mpl_config.resolve())},
+        )
+        env = None
+    else:
+        isolated_runner.warn_no_isolation_once("plot_sandbox")
+
     try:
         proc = await asyncio.create_subprocess_exec(
-            sys.executable,
-            "-c",
-            runner,
+            *argv,
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             start_new_session=True,
-            env={
-                "PATH": os.environ.get("PATH", ""),
-                "PYTHONPATH": "",
-                "HOME": os.environ.get("HOME", "/tmp"),
-                "LANG": os.environ.get("LANG", "C.UTF-8"),
-                "MPLCONFIGDIR": str(mpl_config.resolve()),
-            },
+            env=env,
         )
     except OSError as exc:
         return PlotResult(success=False, output=f"Failed to start sandbox: {exc}")
@@ -399,11 +429,7 @@ async def _kill_process_group(proc: asyncio.subprocess.Process) -> None:
     try:
         os.killpg(proc.pid, 9)
     except (ProcessLookupError, PermissionError, OSError):
-        try:
+        with contextlib.suppress(ProcessLookupError):
             proc.kill()
-        except ProcessLookupError:
-            pass
-    try:
+    with contextlib.suppress(asyncio.TimeoutError, ProcessLookupError):
         await asyncio.wait_for(proc.wait(), timeout=2.0)
-    except (asyncio.TimeoutError, ProcessLookupError):
-        pass

@@ -2,8 +2,7 @@
 
 > 一套分层、可追溯来源的评测体系，用于量化 Conjecta Math Agent 在
 > “计算 → 竞赛推理 → 奥赛上限 → Lean 形式化 → 研究级规划”各能力维度上的表现。
-> 第三方题面不提交到公开 Git 仓库。`data/benchmarks/` 下的数据集由
-> `scripts/build_benchmark_suite.py` 从上游来源按需生成，
+> 所有 `data/benchmarks/` 下的数据集由 `scripts/build_benchmark_suite.py` 从权威来源自动生成，
 > 每个文件的来源、许可证、条数与注意事项记录在 `data/benchmarks/manifest.json`。
 
 ---
@@ -49,10 +48,7 @@
 
 ```bash
 # 一键重建（幂等：覆盖 data/benchmarks/ 下的产物；原始下载缓存在 data/benchmarks/_src/，已 gitignore）
-uv run python scripts/build_benchmark_suite.py
-
-# 仅非商用场景显式加入 CC-BY-NC-SA-4.0 数据
-uv run python scripts/build_benchmark_suite.py --include-noncommercial
+.venv/bin/python scripts/build_benchmark_suite.py
 ```
 
 - 采样确定性：所有采样使用 `random.Random(20260805)`。

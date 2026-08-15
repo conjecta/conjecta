@@ -39,16 +39,6 @@ theorem aime_1999_p11
 """
 
 
-def _fake_mathlib(tmp_path: Path, modules: list[str] | tuple[str, ...]) -> Path:
-    """Create only the Mathlib source files needed by one unit test."""
-    root = tmp_path / "mathlib4"
-    for module in modules:
-        path = root / Path(*module.split(".")).with_suffix(".lean")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("-- unit-test fixture\n", encoding="utf-8")
-    return root
-
-
 def test_extract_statement_single_line():
     name, signature = minif2f.extract_statement(_SAMPLE_LEAN)
     assert name == "mathd_algebra_109"
@@ -69,27 +59,22 @@ def test_extract_statement_rejects_garbage():
         minif2f.extract_statement("theorem foo : True := by trivial")
 
 
-def test_existing_imports_filters_missing_modules(tmp_path):
-    mathlib_dir = _fake_mathlib(tmp_path, ["Mathlib.Data.Real.Basic"])
+def test_existing_imports_filters_missing_modules():
     kept = minif2f.existing_imports(
-        ["Mathlib.Data.Real.Basic", "Mathlib.No.Such.Module", "Batteries.Whatever"],
-        package_dir=mathlib_dir,
+        ["Mathlib.Data.Real.Basic", "Mathlib.No.Such.Module", "Batteries.Whatever"]
     )
     assert kept == ["Mathlib.Data.Real.Basic"]
 
 
-def test_standard_imports_exist_and_are_not_umbrella(tmp_path):
-    mathlib_dir = _fake_mathlib(tmp_path, minif2f.STANDARD_IMPORTS)
-    standard = minif2f.existing_imports(
-        list(minif2f.STANDARD_IMPORTS), package_dir=mathlib_dir
-    )
+def test_standard_imports_exist_and_are_not_umbrella():
+    standard = minif2f.existing_imports(list(minif2f.STANDARD_IMPORTS))
     assert standard == list(minif2f.STANDARD_IMPORTS)
     assert "Mathlib" not in standard  # umbrella import is forbidden
     assert "Mathlib.Tactic.Common" in standard
 
 
 def test_render_problem_embeds_statement_with_precise_imports():
-    imports = list(minif2f.STANDARD_IMPORTS)
+    imports = minif2f.existing_imports(list(minif2f.STANDARD_IMPORTS))
     problem = minif2f.render_problem(
         "Formalize and prove in Lean 4: ... Show that it is 0.",
         "mathd_algebra_109",
@@ -128,7 +113,7 @@ def test_build_rows_schema():
     assert rows[1]["tags"][-1] == "competition"
 
 
-def test_verify_statements_batching_and_fallback(monkeypatch, tmp_path):
+def test_verify_statements_batching_and_fallback(monkeypatch):
     """Elaboration outcomes drive import assignment without running Lean."""
     statements = [
         minif2f.Statement("good_one", "valid", "theorem good_one : True"),
@@ -144,24 +129,15 @@ def test_verify_statements_batching_and_fallback(monkeypatch, tmp_path):
         return ""
 
     monkeypatch.setattr(minif2f, "_run_lean", fake_run_lean)
-    mathlib_dir = _fake_mathlib(
-        tmp_path, minif2f.STANDARD_IMPORTS + minif2f.FALLBACK_IMPORTS
-    )
     imports_by_name, errors = minif2f.verify_statements(
-        statements,
-        jobs=1,
-        batch_size=25,
-        library_path="unused",
-        mathlib_dir=mathlib_dir,
+        statements, jobs=1, batch_size=25, library_path="unused"
     )
-    standard = minif2f.existing_imports(
-        list(minif2f.STANDARD_IMPORTS), package_dir=mathlib_dir
-    )
+    standard = minif2f.existing_imports(list(minif2f.STANDARD_IMPORTS))
     assert errors == {}
     assert imports_by_name["good_one"] == standard
     assert imports_by_name["good_two"] == standard
     assert imports_by_name["bad_one"] == standard + minif2f.existing_imports(
-        list(minif2f.FALLBACK_IMPORTS), package_dir=mathlib_dir
+        list(minif2f.FALLBACK_IMPORTS)
     )
 
 

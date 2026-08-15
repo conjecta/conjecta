@@ -14,6 +14,7 @@ import os
 import weakref
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from fastapi import HTTPException, Request
 
@@ -54,11 +55,22 @@ from math_agent.web.user_memory_routes import user_memory_store_for_user
 from math_agent.web.user_memory_store import UserMemoryStore
 from math_agent.web.post_solve import PostSolveTaskManager
 from math_agent.knowledge.supabase_client import service_role_configured
-from math_agent.billing.api_keys import decrypt_api_key, USER_MODEL_MAP
+from math_agent.billing.api_keys import (
+    USER_API_MODEL,
+    USER_API_PROVIDER,
+    decrypt_api_key,
+)
 from math_agent.billing.models import StoredApiKey, UsageRecord
+from math_agent.net_safety import UnsafeFetchURL, validate_public_https_url
 from math_agent.billing.pricing import cost_for
-from math_agent.billing.quota import is_allowed, is_quota_unlimited, quota_disabled
+from math_agent.billing.quota import (
+    free_tokens_per_day,
+    is_allowed,
+    is_quota_unlimited,
+    quota_disabled,
+)
 from math_agent.billing.usage_store import UsageStore
+from math_agent.web.state_backend import get_state_backend
 
 web_log = logging.getLogger("math_agent.web")
 
@@ -391,12 +403,20 @@ async def _load_user_api_key(user_id: str) -> StoredApiKey | None:
         return decrypt_api_key(data["api_keys_encrypted"])
 
     try:
-        return await asyncio.to_thread(_decrypt)
+        stored = await asyncio.to_thread(_decrypt)
     except Exception as exc:
         web_log.error("Failed to decrypt user API key for %s: %s", user_id, exc)
         raise HTTPException(
             status_code=503, detail="API key configuration error"
         ) from exc
+    if stored.legacy_provider:
+        raise HTTPException(status_code=409, detail="API_ENDPOINT_REBIND_REQUIRED")
+    try:
+        await validate_public_https_url(stored.base_url)
+    except UnsafeFetchURL as exc:
+        web_log.warning("Rejected unsafe user Base URL for %s: %s", user_id, exc)
+        raise HTTPException(status_code=409, detail="API_ENDPOINT_REBIND_REQUIRED") from exc
+    return stored
 
 
 # Per-solve context used to thread the user API key and usage accumulator from
@@ -423,11 +443,21 @@ MAX_API_REQUEST_BYTES = 2 * 1024 * 1024
 
 _DEFAULT_PLATFORM_MODEL_ALLOWLIST = frozenset({
     "openai/gpt-5.6-sol",
+    "openai/gpt-5.6",
+    "shengsuanyun/openai/gpt-5.5",
+    "shengsuanyun/openai/gpt-5.4-mini",
+    "shengsuanyun/openai/gpt-5.4",
+    "shengsuanyun/deepseek/deepseek-v4-pro",
+    "deepseek/deepseek-v4-pro",
+    "deepseek/deepseek-chat",
+    "kimi/k3",
 })
 
 
 def _platform_model_allowlist() -> frozenset[str]:
-    """Return the fixed public model surface; deployments cannot widen it."""
+    raw = os.getenv("CONJECTA_PLATFORM_MODEL_ALLOWLIST", "").strip()
+    if raw:
+        return frozenset(m.strip() for m in raw.split(",") if m.strip())
     return _DEFAULT_PLATFORM_MODEL_ALLOWLIST
 
 
@@ -444,18 +474,14 @@ def _resolve_platform_model(
     configured default) or supply one from the platform allowlist.
     """
     if user_api_key is not None:
-        mapped = USER_MODEL_MAP.get(user_api_key.provider)
-        if mapped is None:
-            raise HTTPException(status_code=503, detail="Unsupported user API key provider.")
-        return f"{user_api_key.provider}/{mapped}"
+        if not user_api_key.base_url:
+            raise HTTPException(status_code=409, detail="API_ENDPOINT_REBIND_REQUIRED")
+        return f"openai/{USER_API_MODEL}"
     if model is None or not str(model).strip():
         if not default_to_config:
             raise HTTPException(status_code=400, detail="Model is required.")
         config = load_config()
-        normalized = normalize_model_string(default_model_string(config))
-        if normalized not in _platform_model_allowlist():
-            raise HTTPException(status_code=503, detail="Configured model is unsupported.")
-        return normalized
+        return default_model_string(config)
     normalized = normalize_model_string(str(model).strip())
     if normalized not in _platform_model_allowlist():
         raise HTTPException(status_code=400, detail="Invalid or unsupported model.")
@@ -463,7 +489,10 @@ def _resolve_platform_model(
 
 
 _PLATFORM_PROVIDER_KEY_ENV: dict[str, str] = {
+    "shengsuanyun": "SHENGSUANYUN_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
     "openai": "OPENAI_API_KEY",
+    "kimi": "KIMI_API_KEY",
 }
 
 
@@ -476,16 +505,6 @@ def _platform_api_key(model: str | None) -> str | None:
         provider = load_config().llm.provider
     env_name = _PLATFORM_PROVIDER_KEY_ENV.get(provider)
     return os.environ.get(env_name) if env_name else None
-
-
-def _platform_base_url(model: str | None) -> str | None:
-    """Return the configured endpoint for the platform model's provider."""
-    config = load_config()
-    raw = (model or "").strip()
-    provider = _parse_model_string(raw)[0] if raw else config.llm.provider
-    if provider != config.llm.provider:
-        return None
-    return config.llm.base_url or None
 
 
 def _check_request_body_size(request: Request, max_bytes: int = MAX_API_REQUEST_BYTES) -> None:
@@ -572,6 +591,63 @@ def _quota_lock(user_id: str) -> asyncio.Lock:
     return lock
 
 
+async def _begin_solve_quota(user_id: str) -> tuple[StoredApiKey | None, str | None]:
+    """Check the free-tier quota and atomically reserve the remaining budget.
+
+    Returns ``(user_api_key, reservation_id)``. ``reservation_id`` is None
+    when the platform free-tier quota is not enforced for this user (own API
+    key, quota disabled, or unlimited); otherwise it must be passed to
+    ``_settle_solve_quota`` exactly once. The reservation holds the user's
+    whole remaining budget, so a second concurrent solve for the same user
+    is rejected instead of both passing the check before either records
+    usage (the state backend makes that check-and-hold atomic, also across
+    replicas when ``web.state_backend = "redis"``).
+    """
+    try:
+        user_api_key = await _load_user_api_key(user_id)
+        if user_api_key is not None:
+            return user_api_key, None
+        if quota_disabled() or is_quota_unlimited(user_id=user_id):
+            return None, None
+        store = UsageStore()
+        today = await asyncio.to_thread(store.daily_usage, user_id)
+        used = int(today.get("total_tokens", 0) or 0)
+        if not is_allowed(used, user_id=user_id):
+            raise HTTPException(status_code=429, detail="DAILY_QUOTA_EXCEEDED")
+        limit = free_tokens_per_day()
+        reservation_id = f"solve-{uuid4().hex}"
+        allowed = await get_state_backend().quota.reserve(
+            reservation_id,
+            user_id,
+            max(1, limit - used),
+            consumed=used,
+            limit=limit,
+        )
+        if not allowed:
+            raise HTTPException(status_code=429, detail="DAILY_QUOTA_EXCEEDED")
+        return None, reservation_id
+    except HTTPException:
+        raise
+    except Exception as exc:
+        web_log.error("Failed to check solve quota for %s: %s", user_id, exc)
+        raise HTTPException(status_code=503, detail="Usage tracking unavailable") from exc
+
+
+async def _settle_solve_quota(reservation_id: str | None, actual_tokens: int) -> None:
+    """Settle a quota reservation with the real usage, or release it unused."""
+    if not reservation_id:
+        return
+    quota = get_state_backend().quota
+    try:
+        if actual_tokens > 0:
+            await quota.settle(reservation_id, actual_tokens)
+        else:
+            await quota.release(reservation_id)
+    except Exception as exc:
+        # A lost reservation is bounded by the backend TTL; never fail the solve.
+        web_log.error("Failed to settle quota reservation %s: %s", reservation_id, exc)
+
+
 async def _build_agent(
     model_string: str | None = None,
     api_key: str | None = None,
@@ -597,7 +673,6 @@ async def _build_agent(
             temperature=config.llm.temperature,
             api_key=api_key,
             timeout_seconds=config.llm.timeout_seconds,
-            base_url=config.llm.base_url or None,
         )
         if critic_model_string:
             critic_llm = create_backend_from_model_string(
@@ -605,7 +680,6 @@ async def _build_agent(
                 temperature=config.critic.temperature,
                 api_key=critic_api_key,
                 timeout_seconds=config.critic.timeout_seconds,
-                base_url=config.critic.base_url or None,
             )
         elif critic_api_key:
             critic_llm = create_backend(config.critic, api_key=critic_api_key)
@@ -619,7 +693,6 @@ async def _build_agent(
                 temperature=config.critic.temperature,
                 api_key=critic_api_key,
                 timeout_seconds=config.critic.timeout_seconds,
-                base_url=config.critic.base_url or None,
             )
         elif critic_api_key:
             critic_llm = create_backend(config.critic, api_key=critic_api_key)
@@ -628,8 +701,8 @@ async def _build_agent(
 
     if usage is not None:
         if user_api_key is not None:
-            usage.provider = user_api_key.provider
-            usage.model = USER_MODEL_MAP.get(user_api_key.provider, "")
+            usage.provider = USER_API_PROVIDER
+            usage.model = USER_API_MODEL
         elif model_string:
             usage.provider, usage.model = _parse_model_string(model_string)
         else:
@@ -676,6 +749,11 @@ async def _build_agent(
         "CONJECTA_KNOWLEDGE_GRAPH_DIR", "data/knowledge_graphs", user_id
     )
     knowledge_graph = KnowledgeGraph(root=graph_root)
+    prover_llm = (
+        create_backend_for_user(config.prover, user_api_key)
+        if user_api_key is not None and config.prover.model.strip()
+        else create_prover_backend(config.prover)
+    )
 
     tool_registry = ToolRegistry(
         enabled_tools=config.agent.tools,
@@ -690,7 +768,7 @@ async def _build_agent(
         mcp_client=_shared_mcp_client,
         agent_config=config.agent,
         search_config=config.search,
-        prover_llm=create_prover_backend(config.prover),
+        prover_llm=prover_llm,
         critic_llm=critic_llm,
     )
 

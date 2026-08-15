@@ -155,3 +155,4 @@ def test_removed_research_spa_pages_are_not_served(monkeypatch, tmp_path):
         "/share/research/token-1",
     ):
         assert client.get(path).status_code == 404, path
+

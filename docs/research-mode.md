@@ -27,7 +27,7 @@ escalation_replan_rounds = 1
 # 可选：把引理/tactic 生成路由到形式化专用模型
 # [llm.prover]
 # provider = "openai"
-# model = "gpt-5.6-sol"
+# model = "deepseek-prover-v2"
 # base_url = "http://localhost:8000/v1"
 ```
 

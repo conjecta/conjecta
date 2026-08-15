@@ -20,11 +20,11 @@ def test_prover_backend_uses_explicit_base_url(monkeypatch):
     monkeypatch.setenv("PROVER_TEST_KEY", "x")
     config = ProverConfig(
         provider="openai",
-        model="gpt-5.6-sol",
+        model="deepseek-prover-v2",
         base_url="http://localhost:8000/v1",
         api_key="sk-test",
     )
     backend = create_prover_backend(config)
     assert backend is not None
-    assert backend.model == "gpt-5.6-sol"
+    assert backend.model == "deepseek-prover-v2"
     assert backend._base_url == "http://localhost:8000/v1"

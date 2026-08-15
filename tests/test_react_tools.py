@@ -50,7 +50,7 @@ async def test_execute_action_searching_uses_llm(monkeypatch):
 
     monkeypatch.setattr("math_agent.search.tavily.tavily_search", fake_tavily)
     monkeypatch.setattr("math_agent.search.duckduckgo.duckduckgo_search", fake_ddg)
-    monkeypatch.setattr("math_agent.agent.tools._llm_search_content", fake_search_content)
+    monkeypatch.setattr("math_agent.tools.builtin.search._llm_search_content", fake_search_content)
     registry = ToolRegistry(enabled_tools=["searching"])
     action = Action(name="searching", args={"query": "Riemann hypothesis"})
     ctx = ToolContext(llm=object())  # any non-None object triggers the LLM path

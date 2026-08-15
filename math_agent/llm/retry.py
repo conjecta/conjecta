@@ -27,7 +27,7 @@ class MalformedResponseError(Exception):
     That is a transient gateway fault, so it is retryable like a 5xx.
     """
 
-# Message markers for OpenAI-compatible gateways that surface transient
+# Message markers for mirrors (e.g. AICodeMirror) that surface transient
 # failures as a bare APIError without a standard HTTP status code.
 _TRANSIENT_ERROR_MARKERS = (
     "concurrency limit",

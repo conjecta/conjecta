@@ -11,8 +11,10 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
 
 from math_agent.billing.api_keys import decrypt_api_key, encrypt_api_key
+from math_agent.billing.api_keys import USER_API_MODEL
 from math_agent.billing.quota import free_tokens_per_day, is_quota_unlimited, remaining_tokens
 from math_agent.billing.usage_store import UsageStore, _today_utc
+from math_agent.net_safety import UnsafeFetchURL, validate_public_https_url
 from math_agent.web.security import _bearer_token, require_auth_user
 
 log = logging.getLogger("math_agent.web.billing_routes")
@@ -84,30 +86,37 @@ async def me_api_key(request: Request):
     return {
         "ok": True,
         "api_key": {
-            "provider": stored.provider,
+            "base_url": stored.base_url or None,
+            "model": USER_API_MODEL,
+            "requires_rebind": bool(stored.legacy_provider),
             "updated_at": data.get("api_keys_updated_at"),
         },
     }
 
 
 class ApiKeyPayload(BaseModel):
-    provider: str
+    base_url: str
     api_key: str
 
 
 @router.post("/me/api-key")
 async def set_me_api_key(request: Request, payload: ApiKeyPayload):
     user = require_auth_user(request)
-    provider = str(payload.provider or "").strip()
+    base_url = str(payload.base_url or "").strip()
     api_key = str(payload.api_key or "").strip()
-    if provider != "openai":
-        raise HTTPException(status_code=400, detail="Unsupported provider.")
     if not api_key:
         raise HTTPException(status_code=400, detail="api_key is required.")
+    if len(api_key) > 16_384:
+        raise HTTPException(status_code=400, detail="api_key is too long.")
+    try:
+        base_url = await validate_public_https_url(base_url)
+    except UnsafeFetchURL as exc:
+        log.info("Rejected user API Base URL for %s: %s", user.user_id, exc)
+        raise HTTPException(status_code=400, detail="INVALID_API_BASE_URL") from exc
     from math_agent.knowledge.supabase_client import create_supabase_client
 
     try:
-        encrypted = encrypt_api_key(provider, api_key)
+        encrypted = encrypt_api_key(base_url, api_key)
     except (RuntimeError, ValueError) as exc:
         log.warning("API key encryption not configured: %s", exc)
         raise HTTPException(status_code=503, detail="API key encryption is not configured.") from exc
@@ -124,7 +133,13 @@ async def set_me_api_key(request: Request, payload: ApiKeyPayload):
     except Exception as exc:
         log.exception("Failed to store api key for %s", user.user_id)
         raise HTTPException(status_code=503, detail="Database error") from exc
-    return {"ok": True, "provider": provider, "updated_at": now}
+    return {
+        "ok": True,
+        "base_url": base_url,
+        "model": USER_API_MODEL,
+        "requires_rebind": False,
+        "updated_at": now,
+    }
 
 
 @router.delete("/me/api-key")

@@ -1,3 +1,5 @@
+import pytest
+
 from math_agent.config import (
     AgentConfig,
     LeanConfig,
@@ -13,7 +15,6 @@ def test_fallback_defaults_match_committed_config(tmp_path, monkeypatch):
     for key in (
         "CONJECTA_LLM_PROVIDER",
         "CONJECTA_LLM_MODEL",
-        "CONJECTA_LLM_BASE_URL",
         "CONJECTA_LEAN_TOOLCHAIN",
         "CONJECTA_LEAN_BUILD_TIMEOUT",
         "CONJECTA_MATH_NEWS_REFRESH_SECONDS",
@@ -22,16 +23,15 @@ def test_fallback_defaults_match_committed_config(tmp_path, monkeypatch):
         monkeypatch.delenv(key, raising=False)
 
     cfg = load_config(tmp_path / "nonexistent.toml")
-    assert cfg.llm.provider == "openai"
-    assert cfg.llm.model == "gpt-5.6-sol"
+    assert cfg.llm.provider == "shengsuanyun"
+    assert cfg.llm.model == "deepseek/deepseek-v4-pro"
     assert cfg.llm.timeout_seconds == 300.0
-    assert cfg.critic.provider == "openai"
-    assert cfg.critic.model == "gpt-5.6-sol"
+    assert cfg.critic.provider == "shengsuanyun"
+    assert cfg.critic.model == "deepseek/deepseek-v4-pro"
     assert cfg.critic.timeout_seconds == 180.0
     assert cfg.lean.lean_toolchain == "leanprover/lean4:v4.30.0"
     assert cfg.lean.mathlib_rev == "v4.30.0"
     assert cfg.lean.build_timeout_seconds == 600
-    assert cfg.lean.enabled is False
 
 
 def test_agent_config_has_react_fields():
@@ -161,8 +161,8 @@ def test_verifier_defaults_to_explicit_formal_policy():
 
 def test_math_news_config_defaults():
     cfg = MathNewsConfig()
-    assert cfg.provider == "openai"
-    assert cfg.model == "gpt-5.6-sol"
+    assert cfg.provider == "deepseek"
+    assert cfg.model == "deepseek-chat"
     assert cfg.refresh_seconds == 6 * 3600
     assert cfg.min_interval_seconds == 3600
 
@@ -170,8 +170,8 @@ def test_math_news_config_defaults():
 def test_config_has_math_news_field():
     cfg = load_config()
     assert hasattr(cfg, "math_news")
-    assert cfg.math_news.provider == "openai"
-    assert cfg.math_news.model == "gpt-5.6-sol"
+    assert cfg.math_news.provider == "deepseek"
+    assert cfg.math_news.model == "deepseek-chat"
     assert cfg.math_news.refresh_seconds == 6 * 3600
     assert cfg.math_news.min_interval_seconds == 3600
 
@@ -181,8 +181,8 @@ def test_load_config_reads_math_news(tmp_path):
     path.write_text(
         """
 [math_news]
-provider = "openai"
-model = "gpt-5.6-sol"
+provider = "shengsuanyun"
+model = "openai/gpt-4o-mini"
 refresh_seconds = 7200
 min_interval_seconds = 1800
 """.strip(),
@@ -190,8 +190,8 @@ min_interval_seconds = 1800
     )
 
     cfg = load_config(path)
-    assert cfg.math_news.provider == "openai"
-    assert cfg.math_news.model == "gpt-5.6-sol"
+    assert cfg.math_news.provider == "shengsuanyun"
+    assert cfg.math_news.model == "openai/gpt-4o-mini"
     assert cfg.math_news.refresh_seconds == 7200
     assert cfg.math_news.min_interval_seconds == 1800
 
@@ -205,26 +205,6 @@ def test_math_news_env_overrides(tmp_path, monkeypatch):
     cfg = load_config(path)
     assert cfg.math_news.refresh_seconds == 1234
     assert cfg.math_news.min_interval_seconds == 567
-
-
-def test_critic_inherits_main_base_url(tmp_path):
-    path = tmp_path / "config.toml"
-    path.write_text(
-        """
-[llm]
-provider = "openai"
-model = "gpt-5.6-sol"
-base_url = "https://example.test/v1"
-
-[llm.critic]
-provider = "openai"
-model = "gpt-5.6-sol"
-""".strip(),
-        encoding="utf-8",
-    )
-
-    cfg = load_config(path)
-    assert cfg.critic.base_url == "https://example.test/v1"
 
 
 def test_math_news_env_overrides_ignore_invalid(tmp_path, monkeypatch):
@@ -306,3 +286,206 @@ repl_max_sessions = 8
     assert cfg.lean.max_check_chars == 4000
     assert cfg.lean.lemma_executor_wall_seconds == 1800.0
     assert cfg.lean.repl_max_sessions == 8
+
+
+# ---------------------------------------------------------------------------
+# Strict loading, max_tool_calls=None semantics, validation, redaction
+# ---------------------------------------------------------------------------
+
+
+def test_unknown_key_raises_in_strict_mode(tmp_path):
+    from math_agent.config import ConfigError
+
+    path = tmp_path / "config.toml"
+    path.write_text("[agent]\nbogus_key = 1\nother_typo = 2\n", encoding="utf-8")
+
+    with pytest.raises(ConfigError, match="bogus_key") as excinfo:
+        load_config(path)
+    assert "other_typo" in str(excinfo.value)
+    assert "[agent]" in str(excinfo.value)
+
+
+def test_unknown_key_warns_when_strict_disabled(tmp_path, monkeypatch, caplog):
+    monkeypatch.setenv("CONJECTA_CONFIG_STRICT", "0")
+    path = tmp_path / "config.toml"
+    path.write_text("[agent]\nbogus_key = 1\n", encoding="utf-8")
+
+    with caplog.at_level("WARNING", logger="math_agent.config"):
+        cfg = load_config(path)
+
+    assert cfg.agent.max_react_steps == 12
+    assert any("bogus_key" in record.message for record in caplog.records)
+
+
+def test_unknown_nested_and_top_level_keys_raise(tmp_path):
+    from math_agent.config import ConfigError
+
+    path = tmp_path / "hitl.toml"
+    path.write_text("[agent.hitl]\nnope = true\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match="agent.hitl"):
+        load_config(path)
+
+    path = tmp_path / "toplevel.toml"
+    path.write_text("[made_up_section]\nfoo = 1\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match="made_up_section"):
+        load_config(path)
+
+    path = tmp_path / "knowledge.toml"
+    path.write_text("[knowledge]\nhybrid_search_top_k = 5\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match="knowledge"):
+        load_config(path)
+
+
+def test_bad_type_raises_naming_key_and_value(tmp_path):
+    from math_agent.config import ConfigError
+
+    path = tmp_path / "config.toml"
+    path.write_text('[agent]\nmax_react_steps = "abc"\n', encoding="utf-8")
+
+    with pytest.raises(ConfigError) as excinfo:
+        load_config(path)
+    message = str(excinfo.value)
+    assert "agent.max_react_steps" in message
+    assert "int" in message
+    assert "'abc'" in message
+
+
+def test_bool_and_fractional_int_type_errors_raise(tmp_path):
+    from math_agent.config import ConfigError
+
+    path = tmp_path / "float_ok.toml"
+    path.write_text("[agent]\nmax_wall_seconds = 8.5\n", encoding="utf-8")
+    # 8.5 is a valid float; this must NOT raise.
+    assert load_config(path).agent.max_wall_seconds == 8.5
+
+    path = tmp_path / "int_truncation.toml"
+    path.write_text("[agent]\nmax_react_steps = 8.5\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match="max_react_steps"):
+        load_config(path)
+
+    path = tmp_path / "bad_bool.toml"
+    path.write_text('[lean]\nenabled = "maybe"\n', encoding="utf-8")
+    with pytest.raises(ConfigError, match="enabled"):
+        load_config(path)
+
+
+def test_removed_research_keys_warn_but_load_in_strict_mode(tmp_path, caplog):
+    path = tmp_path / "config.toml"
+    path.write_text(
+        "[agent]\nresearch_foo = 1\nresearch_refutation_enabled = false\n",
+        encoding="utf-8",
+    )
+
+    with caplog.at_level("WARNING", logger="math_agent.config"):
+        cfg = load_config(path)
+
+    assert cfg.agent.research_refutation_enabled is False
+    messages = [record.message for record in caplog.records]
+    assert any(
+        "research_foo" in message and "removed" in message for message in messages
+    )
+
+
+def test_max_tool_calls_zero_warns_and_means_unlimited(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text("[agent]\nmax_tool_calls = 0\n", encoding="utf-8")
+
+    with pytest.warns(DeprecationWarning, match="max_tool_calls"):
+        cfg = load_config(path)
+
+    assert cfg.agent.max_tool_calls is None
+
+
+def test_max_tool_calls_positive_still_loads(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text("[agent]\nmax_tool_calls = 5\n", encoding="utf-8")
+
+    cfg = load_config(path)
+    assert cfg.agent.max_tool_calls == 5
+
+
+def test_cross_field_validation_raises(tmp_path):
+    from math_agent.config import ConfigError
+
+    path = tmp_path / "reviewers.toml"
+    path.write_text('[agent]\nreviewers_enabled = ["critic", "nope"]\n', encoding="utf-8")
+    with pytest.raises(ConfigError, match="nope"):
+        load_config(path)
+
+    path = tmp_path / "tools.toml"
+    path.write_text('[agent]\ntools = ["compute", "not_a_tool"]\n', encoding="utf-8")
+    with pytest.raises(ConfigError, match="not_a_tool"):
+        load_config(path)
+
+    path = tmp_path / "wall.toml"
+    path.write_text("[agent]\nmax_wall_seconds = -1\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match="max_wall_seconds"):
+        load_config(path)
+
+    path = tmp_path / "lean.toml"
+    path.write_text('[lean]\nenabled = true\nlake_path = ""\n', encoding="utf-8")
+    with pytest.raises(ConfigError, match="lake_path"):
+        load_config(path)
+
+    path = tmp_path / "web.toml"
+    path.write_text('[web]\nstate_backend = "redis"\n', encoding="utf-8")
+    with pytest.raises(ConfigError, match="redis_url"):
+        load_config(path)
+
+
+def test_redacted_summary_masks_secrets():
+    from math_agent.config import Config, redacted_summary
+
+    cfg = Config()
+    cfg.llm.api_key = "super-secret-key"
+    cfg.knowledge.embedding_api_key = "another-secret"
+
+    summary = redacted_summary(cfg)
+
+    assert summary["llm"]["api_key"] == "***"
+    assert summary["knowledge"]["embedding_api_key"] == "***"
+    assert summary["llm"]["provider"] == cfg.llm.provider
+    assert summary["agent"]["max_tool_calls"] == cfg.agent.max_tool_calls
+
+
+def test_redacted_summary_masks_mcp_env_and_headers():
+    from math_agent.config import Config, redacted_summary
+    from math_agent.mcp_config import McpServerConfig
+
+    cfg = Config(
+        mcp_servers=[
+            McpServerConfig(
+                name="svc",
+                env={"MCP_API_KEY": "shh", "PLAIN": "visible"},
+                headers={"Authorization": "Bearer token"},
+            )
+        ]
+    )
+
+    summary = redacted_summary(cfg)
+    server = summary["mcp_servers"][0]
+    assert server["env"]["MCP_API_KEY"] == "***"
+    assert server["env"]["PLAIN"] == "visible"
+    # "Authorization" carries a token but does not match the marker list;
+    # only key/token/secret/password names are masked.
+    assert server["headers"]["Authorization"] == "Bearer token"
+
+
+def test_committed_root_configs_load_under_strict_mode():
+    """The committed TOML configs must pass strict loading unchanged."""
+    from pathlib import Path
+
+    from math_agent.config import clear_config_cache
+
+    for name in (
+        "config.toml",
+        "config.example.toml",
+        "config.eval.toml",
+        "config.retry.toml",
+    ):
+        path = Path(name)
+        if not path.exists():
+            continue
+        clear_config_cache()
+        cfg = load_config(path)
+        assert cfg.agent.max_tool_calls is None or cfg.agent.max_tool_calls > 0

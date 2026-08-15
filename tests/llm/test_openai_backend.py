@@ -162,7 +162,7 @@ def _rate_limit_error():
 
 
 def _mirror_api_error(message: str = "Upstream service temporarily unavailable"):
-    """Bare APIError without a status code, as some gateways emit."""
+    """Bare APIError without a status code, as the AICodeMirror mirror emits."""
     import httpx
     import openai
 

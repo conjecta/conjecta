@@ -76,7 +76,7 @@ async def test_solve_stream_surfaces_pause_without_persisting_completed_turn(mon
         web_app, "_build_agent", lambda **kwargs: _async_agent(FakeAgent())
     )
     monkeypatch.setattr(web_app, "_project_store", lambda user_id=None: store)
-    monkeypatch.setattr(web_app, "default_model_string", lambda config: "openai/gpt-5.6-sol")
+    monkeypatch.setattr(web_app, "default_model_string", lambda config: "openai/test")
     monkeypatch.setattr(
         web_app,
         "persist_turn",

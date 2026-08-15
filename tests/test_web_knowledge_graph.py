@@ -181,7 +181,7 @@ async def test_graph_explore_uses_authoritative_nodes_and_persists_local_edges(
     )
 
     graph = await web_app.explore_knowledge_graph(
-        {"project_id": "proj-1", "model": "openai/gpt-5.6-sol"}, object()
+        {"project_id": "proj-1", "model": "openai/test"}, object()
     )
 
     assert {node["id"] for node in graph["nodes"]} >= {"cloud-fact", "cloud-idea"}

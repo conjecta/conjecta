@@ -48,9 +48,9 @@ def test_quota_enforced_by_default(monkeypatch):
 
 def test_unlimited_quota_phone_skips_limit(monkeypatch):
     monkeypatch.delenv("CONJECTA_DISABLE_QUOTA", raising=False)
-    monkeypatch.setenv("CONJECTA_UNLIMITED_QUOTA_PHONES", "13800000001")
+    monkeypatch.setenv("CONJECTA_UNLIMITED_QUOTA_PHONES", "15721590518")
     clear_unlimited_quota_cache()
-    assert is_quota_unlimited(phone="13800000001") is True
-    assert is_allowed(FREE_TOKENS_PER_DAY * 10, phone="13800000001") is True
+    assert is_quota_unlimited(phone="15721590518") is True
+    assert is_allowed(FREE_TOKENS_PER_DAY * 10, phone="15721590518") is True
     assert is_allowed(FREE_TOKENS_PER_DAY * 10, phone="13800138000") is False
     clear_unlimited_quota_cache()

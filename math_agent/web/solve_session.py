@@ -12,6 +12,7 @@ from math_agent.agent.react_state import ProjectContext
 from math_agent.agent.react_state import HumanInputRequired
 from math_agent.agent.human_interaction import interaction_event
 from math_agent.config import load_config
+from math_agent.llm.factory import normalize_model_string
 from math_agent.log_config import close_session_logger, new_session_logger
 from math_agent.web import agent_factory
 from math_agent.web import hitl_auto_resolve
@@ -20,7 +21,8 @@ from math_agent.web.knowledge_selection import normalize_conversation_history
 from math_agent.web.latex_sanitize import sanitize_latex_answer
 from math_agent.web.project_access import resolve_project_access
 from math_agent.web.solve_mode import resolve_solve_mode
-from math_agent.web.active_solves import active_solve_tasks, solve_capacity
+from math_agent.web.active_solves import active_solve_tasks
+from math_agent.web.state_backend import get_state_backend
 from math_agent.web.trace_store import TraceRecorder
 from math_agent.web.public_errors import public_solve_error
 from math_agent.web.operations import (
@@ -81,13 +83,7 @@ async def stream_solve_events(
     raw_files = msg.get("files") or []
     attachments, attach_notices = await asyncio.to_thread(to_image_parts, raw_files)
     config = load_config()
-    try:
-        model = agent_factory._resolve_platform_model(
-            msg.get("model"), default_to_config=True
-        )
-    except HTTPException as exc:
-        yield {"type": "error", "message": str(exc.detail)}
-        return
+    model = normalize_model_string(msg.get("model") or agent_factory.default_model_string(config))
     api_key = agent_factory._platform_api_key(model)
     requested_project_id = (msg.get("project_id") or "").strip()
     requested_owner_user_id = (msg.get("owner_user_id") or "").strip() or None
@@ -184,10 +180,11 @@ async def stream_solve_events(
         return
     problem = resolved
 
-    if not solve_capacity.try_acquire():
+    capacity_backend = get_state_backend().capacity
+    if not await capacity_backend.try_acquire():
         log.warning(
             "Solve rejected at capacity in_flight=%d user=%s",
-            solve_capacity.in_flight,
+            await capacity_backend.in_flight(),
             user_id or "-",
         )
         yield {
@@ -209,7 +206,7 @@ async def stream_solve_events(
             # A pinned resume must never double-run a session that is already
             # live (e.g. startup recovery racing a manual resume).
             close_session_logger(session_log)
-            solve_capacity.release()
+            await capacity_backend.release()
             capacity_held = False
             yield {"type": "error", "message": "Solve already running."}
             return
@@ -439,7 +436,7 @@ async def stream_solve_events(
             recorder.close()
             session_log.info("=== session end id=%s ===", session_id)
             close_session_logger(session_log)
-            solve_capacity.release()
+            await capacity_backend.release()
 
     try:
         agent = await agent_factory._build_agent(
@@ -570,7 +567,7 @@ async def stream_solve_events(
             session_log.info("=== session end id=%s ===", session_id)
             close_session_logger(session_log)
         if capacity_held and not detached:
-            solve_capacity.release()
+            await capacity_backend.release()
             capacity_held = False
         try:
             reset_usage_context(usage_context_token)

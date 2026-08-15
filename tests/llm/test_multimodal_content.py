@@ -12,12 +12,12 @@ def test_message_accepts_list_content():
 
 
 def test_openai_backend_preserves_list_content(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    monkeypatch.setenv("SHENGSUANYUN_API_KEY", "k")
     from math_agent.llm.openai import OpenAICompatibleBackend
     backend = OpenAICompatibleBackend(
-        model="gpt-5.6-sol",
-        base_url="https://example.test/v1",
-        api_key_env="OPENAI_API_KEY",
+        model="openai/gpt-5.5",
+        base_url="https://router.shengsuanyun.com/api/v1",
+        api_key_env="SHENGSUANYUN_API_KEY",
     )
     parts = [{"type": "text", "text": "hi"}, {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}]
     built = backend._build_api_messages([Message(role="user", content=parts)], system="sys")

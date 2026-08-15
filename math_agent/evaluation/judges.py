@@ -36,9 +36,9 @@ _SIMPLE_LATEX_FRAC_RE = re.compile(r"\\frac\s*\{\s*(-?\d+)\s*\}\s*\{\s*(-?\d+)\s
 # A "clean exact token" is short math (e, 2i, \frac{1}{2}), never a prose word.
 _EXACT_TOKEN_RE = re.compile(r"[0-9a-z\\+\-*/^_{}()=.]+")
 
-# Terminal control sequences occasionally leak into model output from
-# OpenAI-compatible gateways. Strip them before any judging so they cannot
-# break exact/numeric matching.
+# Terminal control sequences occasionally leak into model output (observed
+# from the AICodeMirror mirror wrapping answers in \x1b[1m...\x1b[0m). Strip
+# them before any judging so they cannot break exact/numeric matching.
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
 # Markdown bold spans (**answer**) — models without \boxed training often mark

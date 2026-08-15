@@ -1778,6 +1778,40 @@ async def test_resume_preserves_consumed_tool_call_budget(monkeypatch):
     assert solution.turns[-1].observation.error == "tool_call_budget_exhausted"
 
 
+@pytest.mark.asyncio
+async def test_zero_max_tool_calls_is_unlimited_not_exhausted(monkeypatch):
+    """Regression: max_tool_calls = 0 meant 'unlimited' in the docs but the
+    budget check `tool_calls >= 0` exhausted the budget on the first action.
+    0 is now a deprecated alias for None (unlimited)."""
+    tool_actions = [
+        _action("compute", {"code": str(index)}, thought=f"Call {index}.")
+        for index in range(3)
+    ]
+    llm = FakeLLM(tool_actions + [_conclude("done")])
+    with pytest.warns(DeprecationWarning, match="max_tool_calls"):
+        config = AgentConfig(
+            max_react_steps=6,
+            max_tool_calls=0,
+            reviewers_enabled=[],
+            planning_enabled=False,
+        )
+    assert config.max_tool_calls is None
+    agent = ReActAgent(llm=llm, critic_llm=llm, config=config)
+    execute = AsyncMock(
+        return_value=ToolObservation(success=True, output="ok")
+    )
+    monkeypatch.setattr(agent, "_execute_with_heartbeat", execute)
+
+    solution = await agent.solve("Use unlimited tools")
+
+    assert execute.await_count == 3
+    assert all(
+        turn.observation.error != "tool_call_budget_exhausted"
+        for turn in solution.turns
+    )
+    assert solution.final_answer == "done"
+
+
 @pytest.mark.parametrize("slow_phase", ["generation", "tool", "reviewer"])
 @pytest.mark.asyncio
 async def test_total_wall_time_exhaustion_returns_best_effort(

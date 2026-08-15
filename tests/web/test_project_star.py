@@ -59,3 +59,4 @@ def test_star_endpoint_toggles_and_returns_project(monkeypatch, tmp_path):
 
     resp2 = client.post("/api/projects/p1/star", json={"starred": False})
     assert resp2.json()["starred"] is False
+

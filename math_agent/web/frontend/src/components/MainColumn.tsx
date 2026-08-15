@@ -8,7 +8,10 @@ import { MathText } from './MathText';
 import { finalAnswerFromEvents, useSolveSocket } from '@/hooks/useSolveSocket';
 import { useProject, queryKeys } from '@/api/queries';
 import { getSolveStatus, getSolveTrace } from '@/api/solve';
-import { isQuotaExceededMessage } from '@/lib/publicError';
+import {
+  API_ENDPOINT_REBIND_MESSAGE,
+  isQuotaExceededMessage,
+} from '@/lib/publicError';
 import { findPendingSolveTurn } from '@/lib/pendingSolve';
 import { useUiStore } from '@/store/ui';
 import { groupTurnsIntoConversations } from './ExplorerPanel';
@@ -89,6 +92,8 @@ export function MainColumn() {
   useEffect(() => {
     if (isQuotaExceededMessage(connectionError)) {
       openUsageDialog('quota_exceeded');
+    } else if (connectionError === API_ENDPOINT_REBIND_MESSAGE) {
+      openUsageDialog();
     }
   }, [connectionError, openUsageDialog]);
 

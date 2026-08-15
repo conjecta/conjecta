@@ -3,6 +3,12 @@ export const DEFAULT_PUBLIC_ERROR = '服务暂时遇到问题，请稍后重试�
 export const QUOTA_EXCEEDED_MESSAGE =
   '今日免费额度已用完，请在「用量与 API Key」中绑定自己的 API Key 后继续使用。';
 
+export const API_BASE_URL_INVALID_MESSAGE =
+  'Base URL 无效，必须是服务端可安全访问的公共 HTTPS 地址。';
+
+export const API_ENDPOINT_REBIND_MESSAGE =
+  'API 接口配置已升级，请重新填写 Base URL 和 API Key。';
+
 export const CLOUD_STORAGE_REQUIRED_MESSAGE =
   '好友与协作功能需要云端存储。请在项目根目录 .env 中配置 SUPABASE_URL 与 SUPABASE_SERVICE_ROLE_KEY，执行 docs/supabase_social_collab_schema.sql 后重启服务。详见 docs/local-friends-setup.md。';
 
@@ -21,6 +27,12 @@ export function messageFromStatusAndDetail(status: number, detail?: unknown): st
   if (status === 429 && detail === 'DAILY_QUOTA_EXCEEDED') {
     return QUOTA_EXCEEDED_MESSAGE;
   }
+  if (status === 400 && detail === 'INVALID_API_BASE_URL') {
+    return API_BASE_URL_INVALID_MESSAGE;
+  }
+  if (status === 409 && detail === 'API_ENDPOINT_REBIND_REQUIRED') {
+    return API_ENDPOINT_REBIND_MESSAGE;
+  }
   if (status === 503 && detail === 'CLOUD_STORAGE_REQUIRED') {
     return CLOUD_STORAGE_REQUIRED_MESSAGE;
   }
@@ -37,6 +49,8 @@ export function isQuotaExceededMessage(message: string | null | undefined): bool
 const PUBLIC_ERRORS = new Set([
   DEFAULT_PUBLIC_ERROR,
   QUOTA_EXCEEDED_MESSAGE,
+  API_BASE_URL_INVALID_MESSAGE,
+  API_ENDPOINT_REBIND_MESSAGE,
   CLOUD_STORAGE_REQUIRED_MESSAGE,
   FRIENDS_UNAVAILABLE_MESSAGE,
   ...[400, 401, 403, 404, 413, 422, 429].map(publicErrorMessage),

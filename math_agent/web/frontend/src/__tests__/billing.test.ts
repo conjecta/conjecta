@@ -47,13 +47,23 @@ describe('billing api', () => {
   it('fetchApiKey returns key info when present', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
       ok: true,
-      api_key: { provider: 'openai', updated_at: '2026-07-14T10:00:00Z' },
+      api_key: {
+        base_url: 'https://api.example.com/v1',
+        model: 'gpt-5.6-sol',
+        requires_rebind: false,
+        updated_at: '2026-07-14T10:00:00Z',
+      },
     }));
     vi.stubGlobal('fetch', fetchMock);
 
     const key = await fetchApiKey();
 
-    expect(key).toEqual({ provider: 'openai', updated_at: '2026-07-14T10:00:00Z' });
+    expect(key).toEqual({
+      base_url: 'https://api.example.com/v1',
+      model: 'gpt-5.6-sol',
+      requires_rebind: false,
+      updated_at: '2026-07-14T10:00:00Z',
+    });
     expect(fetchMock).toHaveBeenCalledWith('/api/me/api-key', expect.objectContaining({ credentials: 'same-origin' }));
   });
 
@@ -66,20 +76,30 @@ describe('billing api', () => {
     expect(key).toBeNull();
   });
 
-  it('setApiKey posts provider and key', async () => {
+  it('setApiKey posts Base URL and key', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
       ok: true,
-      provider: 'anthropic',
+      base_url: 'https://api.example.com/v1',
+      model: 'gpt-5.6-sol',
+      requires_rebind: false,
       updated_at: '2026-07-14T11:00:00Z',
     }));
     vi.stubGlobal('fetch', fetchMock);
 
-    const key = await setApiKey('anthropic', 'sk-ant-test');
+    const key = await setApiKey('https://api.example.com/v1', 'sk-user-test');
 
-    expect(key).toEqual({ provider: 'anthropic', updated_at: '2026-07-14T11:00:00Z' });
+    expect(key).toEqual({
+      base_url: 'https://api.example.com/v1',
+      model: 'gpt-5.6-sol',
+      requires_rebind: false,
+      updated_at: '2026-07-14T11:00:00Z',
+    });
     const [, init] = fetchMock.mock.calls[0];
     expect(init).toEqual(expect.objectContaining({ method: 'POST' }));
-    expect(JSON.parse(init.body as string)).toEqual({ provider: 'anthropic', api_key: 'sk-ant-test' });
+    expect(JSON.parse(init.body as string)).toEqual({
+      base_url: 'https://api.example.com/v1',
+      api_key: 'sk-user-test',
+    });
     expect(new Headers(init.headers).get('Content-Type')).toBe('application/json');
   });
 

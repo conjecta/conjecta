@@ -55,10 +55,10 @@ class _Client:
 def test_default_admin_phone_and_env_override(monkeypatch):
     monkeypatch.delenv("CONJECTA_ADMIN_PHONES", raising=False)
     # No hard-coded default admin: unset env means nobody is admin.
-    assert is_admin_phone("13800000002") is False
+    assert is_admin_phone("17855537173") is False
     assert is_admin_phone("13812345678") is False
     monkeypatch.setenv("CONJECTA_ADMIN_PHONES", "13812345678, 13900001111")
-    assert is_admin_phone("13800000002") is False
+    assert is_admin_phone("17855537173") is False
     assert is_admin_phone("+86 138 1234 5678") is True
 
 
@@ -84,8 +84,8 @@ def test_record_usage_carries_user_and_session_context():
     token = set_usage_context(user_id="u-one", session_id="s-one", operation="solve")
     try:
         OperationsStore(client=client).record_usage(
-            provider="openai",
-            model="gpt-5.6-sol",
+            provider="deepseek",
+            model="deepseek-v4-pro",
             usage={
                 "input_tokens": 10,
                 "output_tokens": 5,
@@ -114,7 +114,7 @@ def test_dashboard_joins_users_runs_and_token_usage():
                     "project_id": "default",
                     "problem": "Prove it",
                     "mode": "auto",
-                    "model": "openai/gpt-5.6-sol",
+                    "model": "deepseek/deepseek-v4-pro",
                     "status": "completed",
                     "started_at": started.isoformat(),
                     "finished_at": now.isoformat(),
@@ -124,8 +124,8 @@ def test_dashboard_joins_users_runs_and_token_usage():
                 {
                     "user_id": "u-one",
                     "session_id": "s-one",
-                    "provider": "openai",
-                    "model": "gpt-5.6-sol",
+                    "provider": "deepseek",
+                    "model": "deepseek-v4-pro",
                     "input_tokens": 100,
                     "output_tokens": 40,
                     "total_tokens": 140,

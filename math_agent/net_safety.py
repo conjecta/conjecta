@@ -12,6 +12,44 @@ class UnsafeFetchURL(ValueError):
     """Raised when a requested fetch target is not safe for server-side access."""
 
 
+def normalize_public_https_url(url: str) -> str:
+    """Return a canonical public HTTPS endpoint URL after structural checks."""
+    normalized = url.strip()
+    if not normalized:
+        raise UnsafeFetchURL("Base URL is required.")
+    if len(normalized) > 2048:
+        raise UnsafeFetchURL("Base URL is too long.")
+    if any(ord(char) < 32 or char.isspace() for char in normalized):
+        raise UnsafeFetchURL("Base URL contains invalid whitespace or control characters.")
+    parsed = urlparse(normalized)
+    if parsed.scheme.lower() != "https":
+        raise UnsafeFetchURL("Base URL must use HTTPS.")
+    if not parsed.hostname:
+        raise UnsafeFetchURL("Base URL must include a host.")
+    if parsed.username or parsed.password:
+        raise UnsafeFetchURL("Base URL must not include embedded credentials.")
+    if parsed.query or parsed.fragment:
+        raise UnsafeFetchURL("Base URL must not include a query string or fragment.")
+    try:
+        # Accessing .port raises ValueError for a missing or out-of-range port.
+        parsed.port  # noqa: B018
+    except ValueError as exc:
+        raise UnsafeFetchURL("Base URL contains an invalid port.") from exc
+    return normalized.rstrip("/")
+
+
+async def validate_public_https_url(url: str) -> str:
+    """Validate an OpenAI-compatible endpoint and reject internal networks."""
+    normalized = normalize_public_https_url(url)
+    parsed = urlparse(normalized)
+    addresses = await asyncio.to_thread(_validate_host, parsed.hostname)
+    if any(not ipaddress.ip_address(address).is_global for address in addresses):
+        raise UnsafeFetchURL(
+            "Base URL host resolves to a non-public network address."
+        )
+    return normalized
+
+
 @dataclass(frozen=True)
 class SafeFetchResponse:
     url: str
@@ -67,12 +105,34 @@ _BLOCKED_NETWORKS = [
 ]
 
 
-def _blocked_ip(address: str) -> bool:
+def normalize_ip(value: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
+    """Parse *value*, mapping IPv4-mapped IPv6 addresses back to IPv4.
+
+    Raises ``ValueError`` when *value* is not a valid IP address literal.
+    """
+    ip = ipaddress.ip_address(value)
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        return ip.ipv4_mapped
+    return ip
+
+
+def is_blocked_ip(value: str) -> bool:
+    """Return True when *value* falls in a blocked or non-public range."""
     try:
-        ip = ipaddress.ip_address(address)
+        ip = normalize_ip(value)
     except ValueError:
         return True
-    return any(ip in net for net in _BLOCKED_NETWORKS)
+    if ip.is_unspecified or ip.is_multicast:
+        return True
+    return any(
+        ip in network
+        for network in _BLOCKED_NETWORKS
+        if ip.version == network.version
+    )
+
+
+def _blocked_ip(address: str) -> bool:
+    return is_blocked_ip(address)
 
 
 def _validate_host(host: str) -> list[str]:
@@ -92,7 +152,7 @@ def _validate_host(host: str) -> list[str]:
             raise UnsafeFetchURL(f"Could not resolve URL host: {host}") from exc
         addresses = [info[4][0] for info in infos]
         if not addresses:
-            raise UnsafeFetchURL(f"Could not resolve URL host: {host}")
+            raise UnsafeFetchURL(f"Could not resolve URL host: {host}") from None
         blocked = [addr for addr in addresses if _blocked_ip(addr)]
     else:
         addresses = [str(ip)]

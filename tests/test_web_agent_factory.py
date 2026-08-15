@@ -8,7 +8,9 @@ import pytest
 from math_agent.agent import supervisor
 from math_agent.agent.knowledge_evaluator import KnowledgeEvaluator
 from math_agent.agent.plan_memory import DEFAULT_SEED_MEMORY_PATH
+from math_agent.billing.models import StoredApiKey
 from math_agent.config import Config, CriticConfig, LLMConfig
+from math_agent.net_safety import UnsafeFetchURL
 from math_agent.web import agent_factory as web_app
 from math_agent.web.project_store import ProjectStore
 
@@ -16,16 +18,14 @@ from math_agent.web.project_store import ProjectStore
 def _factory_config() -> Config:
     config = Config(
         llm=LLMConfig(
-            provider="openai",
-            model="gpt-5.6-sol",
+            provider="shengsuanyun",
+            model="openai/configured-main",
             temperature=0.7,
-            base_url="https://main.example.test/v1",
         ),
         critic=CriticConfig(
-            provider="openai",
-            model="gpt-5.6-sol",
+            provider="deepseek",
+            model="configured-critic",
             temperature=0.15,
-            base_url="https://critic.example.test/v1",
         ),
     )
     config.lean.enabled = False
@@ -55,6 +55,27 @@ def _stub_agent_dependencies(monkeypatch, config: Config):
     return captured
 
 
+def _stub_stored_user_key(monkeypatch, stored: StoredApiKey):
+    from math_agent.knowledge import supabase_client
+
+    fake_query = SimpleNamespace(
+        select=lambda *_args: fake_query,
+        eq=lambda *_args: fake_query,
+        limit=lambda *_args: fake_query,
+        execute=lambda: SimpleNamespace(data=[{"api_keys_encrypted": "ciphertext"}]),
+    )
+    fake_client = SimpleNamespace(table=lambda *_args: fake_query)
+    monkeypatch.setattr(
+        supabase_client.SupabaseConfig,
+        "from_env",
+        classmethod(lambda cls, **_kwargs: object()),
+    )
+    monkeypatch.setattr(
+        supabase_client, "create_supabase_client", lambda **_kwargs: fake_client
+    )
+    monkeypatch.setattr(web_app, "decrypt_api_key", lambda _ciphertext: stored)
+
+
 @pytest.mark.asyncio
 async def test_main_model_override_preserves_configured_critic(monkeypatch):
     config = _factory_config()
@@ -77,12 +98,93 @@ async def test_main_model_override_preserves_configured_critic(monkeypatch):
         temperature=config.llm.temperature,
         api_key="main-provider-key",
         timeout_seconds=config.llm.timeout_seconds,
-        base_url=config.llm.base_url,
     )
     from_config.assert_called_once_with(config.critic)
     assert agent.llm is main_backend
     assert agent.critic_llm is critic_backend
     assert captured["critic_llm"] is critic_backend
+
+
+@pytest.mark.asyncio
+async def test_user_endpoint_is_used_for_main_critic_and_enabled_prover(monkeypatch):
+    config = _factory_config()
+    config.prover.model = "server-prover"
+    captured = _stub_agent_dependencies(monkeypatch, config)
+    main_backend = object()
+    critic_backend = object()
+    prover_backend = object()
+    user_endpoint = StoredApiKey(
+        api_key="sk-user", base_url="https://api.example.com/v1"
+    )
+    for_user = Mock(
+        side_effect=[main_backend, critic_backend, prover_backend]
+    )
+    from_config = Mock()
+    monkeypatch.setattr(web_app, "create_backend_for_user", for_user)
+    monkeypatch.setattr(web_app, "create_prover_backend", from_config)
+
+    agent = await web_app._build_agent(
+        user_id="user-1", user_api_key=user_endpoint
+    )
+
+    assert for_user.call_args_list == [
+        call(config.llm, user_endpoint),
+        call(config.critic, user_endpoint),
+        call(config.prover, user_endpoint),
+    ]
+    from_config.assert_not_called()
+    assert agent.llm is main_backend
+    assert agent.critic_llm is critic_backend
+    assert captured["tool_registry_kwargs"]["prover_llm"] is prover_backend
+
+
+@pytest.mark.asyncio
+async def test_load_user_api_key_revalidates_stored_base_url(monkeypatch):
+    stored = StoredApiKey(
+        api_key="sk-user", base_url="https://api.example.com/v1"
+    )
+    _stub_stored_user_key(monkeypatch, stored)
+    validated = []
+
+    async def validate(base_url: str) -> str:
+        validated.append(base_url)
+        return base_url
+
+    monkeypatch.setattr(web_app, "validate_public_https_url", validate)
+
+    assert await web_app._load_user_api_key("user-1") is stored
+    assert validated == ["https://api.example.com/v1"]
+
+
+@pytest.mark.asyncio
+async def test_load_user_api_key_requires_rebind_for_unsafe_stored_url(monkeypatch):
+    _stub_stored_user_key(
+        monkeypatch,
+        StoredApiKey(api_key="sk-user", base_url="https://127.0.0.1/v1"),
+    )
+
+    async def reject(_base_url: str) -> str:
+        raise UnsafeFetchURL("private or reserved")
+
+    monkeypatch.setattr(web_app, "validate_public_https_url", reject)
+
+    with pytest.raises(web_app.HTTPException) as error:
+        await web_app._load_user_api_key("user-1")
+    assert error.value.status_code == 409
+    assert error.value.detail == "API_ENDPOINT_REBIND_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_load_user_api_key_requires_rebind_for_legacy_record(monkeypatch):
+    _stub_stored_user_key(
+        monkeypatch,
+        StoredApiKey(api_key="sk-old", legacy_provider="openai"),
+    )
+
+    with pytest.raises(web_app.HTTPException) as error:
+        await web_app._load_user_api_key("user-1")
+    assert error.value.status_code == 409
+    assert error.value.detail == "API_ENDPOINT_REBIND_REQUIRED"
 
 
 @pytest.mark.asyncio
@@ -304,14 +406,12 @@ async def test_dedicated_critic_override_uses_its_own_credentials(monkeypatch):
             temperature=config.llm.temperature,
             api_key="main-provider-key",
             timeout_seconds=config.llm.timeout_seconds,
-            base_url=config.llm.base_url,
         ),
         call(
             "deepseek/ui-critic",
             temperature=config.critic.temperature,
             api_key="critic-provider-key",
             timeout_seconds=config.critic.timeout_seconds,
-            base_url=config.critic.base_url,
         ),
     ]
     from_config.assert_not_called()

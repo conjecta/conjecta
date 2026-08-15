@@ -39,6 +39,7 @@ class OpenAICompatibleBackend:
         provider_name: str = "openai",
         retry_max_attempts: int = 3,
         retry_base_seconds: float = 5.0,
+        follow_redirects: bool = True,
     ):
         self.model = model
         self.default_temperature = default_temperature
@@ -54,18 +55,25 @@ class OpenAICompatibleBackend:
         # 0 retries disables retrying and keeps the previous fail-fast behavior.
         self._retry_max_attempts = max(0, int(retry_max_attempts))
         self._retry_base_seconds = max(0.0, float(retry_base_seconds))
+        self._follow_redirects = follow_redirects
         self._client: Any | None = None
 
     @property
     def client(self) -> Any:
         if self._client is None:
-            from openai import AsyncOpenAI
+            from openai import AsyncOpenAI, DefaultAsyncHttpxClient
 
-            self._client = AsyncOpenAI(
-                api_key=self._api_key,
-                base_url=self._base_url,
-                timeout=self._timeout_seconds,
-            )
+            client_kwargs: dict[str, Any] = {
+                "api_key": self._api_key,
+                "base_url": self._base_url,
+                "timeout": self._timeout_seconds,
+            }
+            if not self._follow_redirects:
+                client_kwargs["http_client"] = DefaultAsyncHttpxClient(
+                    follow_redirects=self._follow_redirects,
+                    timeout=self._timeout_seconds,
+                )
+            self._client = AsyncOpenAI(**client_kwargs)
         return self._client
 
     def _build_api_messages(self, messages: list[Message], system: str) -> list[dict]:

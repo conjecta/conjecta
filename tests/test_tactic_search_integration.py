@@ -49,5 +49,5 @@ def test_default_config_exposes_lean_defaults() -> None:
     """Smoke test that default_config yields a usable Lean configuration."""
     cfg = default_config()
     assert isinstance(cfg.lean, LeanConfig)
-    assert cfg.lean.enabled is False
+    assert cfg.lean.enabled is True
     assert cfg.lean.mathlib_dep is True
