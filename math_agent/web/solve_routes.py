@@ -18,22 +18,25 @@ from math_agent.agent.research_artifacts import _safe_component
 from math_agent.web.active_solves import (
     active_solve_tasks,
     max_concurrent_solves,
-    solve_capacity,
 )
 from math_agent.web.agent_factory import (
-    _check_solve_quota,
+    _begin_solve_quota,
     _project_store,
-    _quota_lock,
     _record_usage,
+    _settle_solve_quota,
     _solve_usage,
     _solve_user_api_key,
     lean_jobs,
+)
+from math_agent.web.agent_factory import (  # noqa: F401  (tests patch it here)
+    _check_solve_quota,
 )
 from math_agent.web.attachments import MAX_SOLVE_REQUEST_BYTES
 from math_agent.web.security import require_auth_user, require_http_app_access
 from math_agent.web.solve_mode import resolve_solve_mode
 from math_agent.web import hitl_auto_resolve
 from math_agent.web.solve_session import encode_ndjson_event, stream_solve_events
+from math_agent.web.state_backend import get_state_backend
 from math_agent.web.trace_store import SESSION_ID_RE, read_trace, trace_exists
 
 web_log = logging.getLogger("math_agent.web")
@@ -78,6 +81,7 @@ async def _ndjson_solve_stream(
     user_id: str,
     user_api_key: StoredApiKey | None,
     usage: _UsageAccumulator,
+    quota_reservation: str | None = None,
 ) -> AsyncIterator[str]:
     """Encode one solve session as NDJSON with heartbeat pings and disconnect
     logging. Shared by the solve stream, HITL-decision resume, and goal-action
@@ -126,9 +130,12 @@ async def _ndjson_solve_stream(
         _solve_user_api_key.reset(token_key)
         _solve_usage.reset(token_usage)
         await _record_usage(user_api_key, usage, user_id)
+        # Settle only after the durable usage record: while the reservation is
+        # held, concurrent solves cannot pass the quota check on stale usage.
+        await _settle_solve_quota(quota_reservation, usage.total_tokens)
 
 
-def _require_solve_capacity() -> None:
+async def _require_solve_capacity() -> None:
     """Reject at the HTTP boundary while a real status code can still be sent.
 
     Once StreamingResponse starts, headers are committed and the only way to
@@ -136,7 +143,7 @@ def _require_solve_capacity() -> None:
     This is an advisory pre-check; ``stream_solve_events`` still owns the
     authoritative slot acquisition.
     """
-    if solve_capacity.in_flight >= max_concurrent_solves():
+    if await get_state_backend().capacity.in_flight() >= max_concurrent_solves():
         raise HTTPException(status_code=429, detail="SERVER_BUSY")
 
 
@@ -149,10 +156,9 @@ async def solve_stream(request: Request) -> StreamingResponse:
         resolve_solve_mode(msg)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    _require_solve_capacity()
+    await _require_solve_capacity()
 
-    async with _quota_lock(user.user_id):
-        user_api_key = await _check_solve_quota(user.user_id)
+    user_api_key, quota_reservation = await _begin_solve_quota(user.user_id)
     usage = _UsageAccumulator()
 
     return StreamingResponse(
@@ -162,6 +168,7 @@ async def solve_stream(request: Request) -> StreamingResponse:
             user_id=user.user_id,
             user_api_key=user_api_key,
             usage=usage,
+            quota_reservation=quota_reservation,
         ),
         media_type="application/x-ndjson",
     )
@@ -278,8 +285,7 @@ async def resume_solve_with_human_decision(
         "human_decision": human_decision,
     }
 
-    async with _quota_lock(user.user_id):
-        user_api_key = await _check_solve_quota(user.user_id)
+    user_api_key, quota_reservation = await _begin_solve_quota(user.user_id)
     usage = _UsageAccumulator()
 
     return StreamingResponse(
@@ -289,6 +295,7 @@ async def resume_solve_with_human_decision(
             user_id=user.user_id,
             user_api_key=user_api_key,
             usage=usage,
+            quota_reservation=quota_reservation,
         ),
         media_type="application/x-ndjson",
     )
@@ -356,8 +363,7 @@ async def apply_solve_goal_action(
         "goal_action": goal_action,
     }
 
-    async with _quota_lock(user.user_id):
-        user_api_key = await _check_solve_quota(user.user_id)
+    user_api_key, quota_reservation = await _begin_solve_quota(user.user_id)
     usage = _UsageAccumulator()
 
     return StreamingResponse(
@@ -367,6 +373,7 @@ async def apply_solve_goal_action(
             user_id=user.user_id,
             user_api_key=user_api_key,
             usage=usage,
+            quota_reservation=quota_reservation,
         ),
         media_type="application/x-ndjson",
     )

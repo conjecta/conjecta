@@ -1,0 +1,42 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, Mondays 06:00 UTC.
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (Python)
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      # Required to upload results to the code-scanning dashboard.
+      security-events: write
+    steps:
+      # TODO(security): pin github/codeql-action (and actions/checkout) to
+      # full commit SHAs with a version comment, e.g.
+      #   uses: github/codeql-action/init@<sha> # v4.x.y
+      # Major-version tags are used for now; v3 is deprecated in Dec 2026, so
+      # pin a v4 SHA when doing this.
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: python
+
+      # No build step: CodeQL extracts Python without compiling, and the
+      # default queries (security-and-quality is intentionally NOT enabled
+      # yet to keep the first run's noise down) run against the source tree.
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4

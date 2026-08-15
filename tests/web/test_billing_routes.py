@@ -2,6 +2,8 @@ from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 
+from math_agent.billing.models import StoredApiKey
+from math_agent.net_safety import UnsafeFetchURL
 from math_agent.web.app import app
 
 client = TestClient(app)
@@ -81,7 +83,7 @@ def test_me_usage_unlimited_quota_phone(monkeypatch):
     )
     monkeypatch.delenv("CONJECTA_ALLOW_UNAUTHENTICATED", raising=False)
     monkeypatch.delenv("CONJECTA_DISABLE_QUOTA", raising=False)
-    monkeypatch.setenv("CONJECTA_UNLIMITED_QUOTA_PHONES", "13800000001")
+    monkeypatch.setenv("CONJECTA_UNLIMITED_QUOTA_PHONES", "15721590518")
     clear_unlimited_quota_cache()
 
     class FakeUsageStore:
@@ -105,7 +107,7 @@ def test_me_usage_unlimited_quota_phone(monkeypatch):
             }
 
     monkeypatch.setattr("math_agent.web.billing_routes.UsageStore", FakeUsageStore)
-    token, _user, _ttl = issue_access_token("13800000001")
+    token, _user, _ttl = issue_access_token("15721590518")
     resp = client.get("/api/me/usage", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
     body = resp.json()
@@ -130,7 +132,7 @@ def test_me_api_key_returns_none_when_not_set(monkeypatch):
     assert resp.json() == {"ok": True, "api_key": None}
 
 
-def test_me_api_key_returns_provider_when_set(monkeypatch):
+def test_me_api_key_returns_endpoint_when_set(monkeypatch):
     monkeypatch.delenv("CONJECTA_JWT_SECRET", raising=False)
     monkeypatch.setenv("CONJECTA_ALLOW_UNAUTHENTICATED", "1")
 
@@ -143,35 +145,61 @@ def test_me_api_key_returns_provider_when_set(monkeypatch):
         lambda **_: fake_client,
     )
 
-    class FakeStoredKey:
-        provider = "openai"
-
     monkeypatch.setattr(
         "math_agent.web.billing_routes.decrypt_api_key",
-        lambda _ciphertext: FakeStoredKey(),
+        lambda _ciphertext: StoredApiKey(
+            api_key="sk-hidden", base_url="https://api.example.com/v1"
+        ),
     )
 
     resp = client.get("/api/me/api-key")
     assert resp.status_code == 200
     body = resp.json()
     assert body["ok"] is True
-    assert body["api_key"]["provider"] == "openai"
+    assert body["api_key"]["base_url"] == "https://api.example.com/v1"
+    assert body["api_key"]["model"] == "gpt-5.6-sol"
+    assert body["api_key"]["requires_rebind"] is False
+    assert "sk-hidden" not in resp.text
     assert body["api_key"]["updated_at"] == "2024-01-01T00:00:00Z"
 
 
-def test_set_me_api_key_rejects_invalid_provider(monkeypatch):
+def test_me_api_key_marks_legacy_record_for_rebind(monkeypatch):
     monkeypatch.delenv("CONJECTA_JWT_SECRET", raising=False)
     monkeypatch.setenv("CONJECTA_ALLOW_UNAUTHENTICATED", "1")
 
-    resp = client.post("/api/me/api-key", json={"provider": "invalid", "api_key": "sk-xxx"})
-    assert resp.status_code == 400
+    fake_client = MagicMock()
+    fake_client.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(
+        data=[{"api_keys_encrypted": "legacy", "api_keys_updated_at": "2024-01-01T00:00:00Z"}]
+    )
+    monkeypatch.setattr(
+        "math_agent.knowledge.supabase_client.create_supabase_client",
+        lambda **_: fake_client,
+    )
+    monkeypatch.setattr(
+        "math_agent.web.billing_routes.decrypt_api_key",
+        lambda _ciphertext: StoredApiKey(
+            api_key="sk-hidden", legacy_provider="openai"
+        ),
+    )
+
+    resp = client.get("/api/me/api-key")
+    assert resp.status_code == 200
+    assert resp.json()["api_key"] == {
+        "base_url": None,
+        "model": "gpt-5.6-sol",
+        "requires_rebind": True,
+        "updated_at": "2024-01-01T00:00:00Z",
+    }
 
 
 def test_set_me_api_key_rejects_empty_key(monkeypatch):
     monkeypatch.delenv("CONJECTA_JWT_SECRET", raising=False)
     monkeypatch.setenv("CONJECTA_ALLOW_UNAUTHENTICATED", "1")
 
-    resp = client.post("/api/me/api-key", json={"provider": "openai", "api_key": "   "})
+    resp = client.post(
+        "/api/me/api-key",
+        json={"base_url": "https://api.example.com/v1", "api_key": "   "},
+    )
     assert resp.status_code == 400
 
 
@@ -181,27 +209,62 @@ def test_set_me_api_key_stores_encrypted_key(monkeypatch):
 
     captured = {}
 
-    def fake_encrypt(provider, api_key):
-        captured["provider"] = provider
+    def fake_encrypt(base_url, api_key):
+        captured["base_url"] = base_url
         captured["api_key"] = api_key
         return "encrypted-blob"
 
+    async def fake_validate(base_url):
+        assert base_url == "https://api.example.com/v1/"
+        return "https://api.example.com/v1"
+
     fake_client = MagicMock()
     monkeypatch.setattr("math_agent.web.billing_routes.encrypt_api_key", fake_encrypt)
+    monkeypatch.setattr(
+        "math_agent.web.billing_routes.validate_public_https_url", fake_validate
+    )
     monkeypatch.setattr(
         "math_agent.knowledge.supabase_client.create_supabase_client",
         lambda **_: fake_client,
     )
 
-    resp = client.post("/api/me/api-key", json={"provider": "openai", "api_key": "sk-secret"})
+    resp = client.post(
+        "/api/me/api-key",
+        json={
+            "base_url": "https://api.example.com/v1/",
+            "api_key": "sk-secret",
+        },
+    )
     assert resp.status_code == 200
     body = resp.json()
     assert body["ok"] is True
-    assert body["provider"] == "openai"
-    assert captured["provider"] == "openai"
+    assert body["base_url"] == "https://api.example.com/v1"
+    assert body["model"] == "gpt-5.6-sol"
+    assert body["requires_rebind"] is False
+    assert captured["base_url"] == "https://api.example.com/v1"
     assert captured["api_key"] == "sk-secret"
+    assert "sk-secret" not in resp.text
     update_call = fake_client.table.return_value.update
     assert update_call.call_args[0][0]["api_keys_encrypted"] == "encrypted-blob"
+
+
+def test_set_me_api_key_rejects_invalid_base_url(monkeypatch):
+    monkeypatch.delenv("CONJECTA_JWT_SECRET", raising=False)
+    monkeypatch.setenv("CONJECTA_ALLOW_UNAUTHENTICATED", "1")
+
+    async def reject_url(_base_url):
+        raise UnsafeFetchURL("Base URL must use HTTPS.")
+
+    monkeypatch.setattr(
+        "math_agent.web.billing_routes.validate_public_https_url", reject_url
+    )
+
+    resp = client.post(
+        "/api/me/api-key",
+        json={"base_url": "http://127.0.0.1/v1", "api_key": "sk-secret"},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "INVALID_API_BASE_URL"
 
 
 def test_delete_me_api_key_clears_stored_key(monkeypatch):
@@ -225,12 +288,21 @@ def test_set_me_api_key_returns_503_when_encryption_not_configured(monkeypatch):
     monkeypatch.delenv("CONJECTA_JWT_SECRET", raising=False)
     monkeypatch.setenv("CONJECTA_ALLOW_UNAUTHENTICATED", "1")
 
-    def failing_encrypt(_provider, _api_key):
+    async def fake_validate(base_url):
+        return base_url
+
+    def failing_encrypt(_base_url, _api_key):
         raise RuntimeError("CONJECTA_API_KEY_ENCRYPTION_KEY is not set")
 
     monkeypatch.setattr("math_agent.web.billing_routes.encrypt_api_key", failing_encrypt)
+    monkeypatch.setattr(
+        "math_agent.web.billing_routes.validate_public_https_url", fake_validate
+    )
 
-    resp = client.post("/api/me/api-key", json={"provider": "openai", "api_key": "sk-secret"})
+    resp = client.post(
+        "/api/me/api-key",
+        json={"base_url": "https://api.example.com/v1", "api_key": "sk-secret"},
+    )
     assert resp.status_code == 503
     assert resp.json()["detail"] == "API key encryption is not configured."
 
@@ -358,14 +430,20 @@ def test_set_me_api_key_returns_503_on_bad_encryption_key(monkeypatch):
     monkeypatch.delenv("CONJECTA_JWT_SECRET", raising=False)
     monkeypatch.setenv("CONJECTA_ALLOW_UNAUTHENTICATED", "1")
 
-    def _bad_encrypt(_provider: str, _api_key: str) -> str:
+    async def _valid_url(base_url: str) -> str:
+        return base_url
+
+    def _bad_encrypt(_base_url: str, _api_key: str) -> str:
         raise ValueError("CONJECTA_API_KEY_ENCRYPTION_KEY must decode to 32 bytes")
 
     monkeypatch.setattr("math_agent.web.billing_routes.encrypt_api_key", _bad_encrypt)
+    monkeypatch.setattr(
+        "math_agent.web.billing_routes.validate_public_https_url", _valid_url
+    )
 
     resp = client.post(
         "/api/me/api-key",
-        json={"provider": "openai", "api_key": "sk-test"},
+        json={"base_url": "https://api.example.com/v1", "api_key": "sk-test"},
     )
     assert resp.status_code == 503
     assert resp.json()["detail"] == "API key encryption is not configured."

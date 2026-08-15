@@ -189,3 +189,10 @@ model = "text-embedding-3-small"
 # name = "arxiv"
 # transport = "stdio"
 # command = "arxiv-mcp-server"
+
+[web]
+# State backend for rate limiting, SMS throttling, solve capacity, and quota
+# reservations. "memory" is single-replica only; use "redis" when running
+# multiple replicas so limits and quotas are enforced globally.
+state_backend = "memory"        # "memory" or "redis"
+# redis_url = "redis://localhost:6379/0"  # required when state_backend = "redis"

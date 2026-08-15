@@ -73,7 +73,7 @@ describe('Composer', () => {
     const sendProblem = vi.fn();
     render(<Composer sendProblem={sendProblem} interrupt={() => {}} status="idle" />);
 
-    expect(screen.getByLabelText('模型 GPT-5.6 Sol')).toHaveTextContent('GPT-5.6 Sol');
+    expect(screen.getByLabelText('模型 OpenAI GPT-5.6 Sol')).toHaveTextContent('GPT-5.6 Sol');
     expect(screen.queryByRole('combobox', { name: '模型' })).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByPlaceholderText(/写下要证明/i), {

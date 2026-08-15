@@ -20,6 +20,7 @@ dependencies = [
     "pdf2image>=1.17.0",
     "beautifulsoup4>=4.12.0",
     "python-dotenv>=1.0.0",
+    "pydantic>=2.0",
     'tomli>=1.2.0; python_version < "3.11"',
     "PyJWT>=2.8.0",
     "alibabacloud_dypnsapi20170525>=1.0.0",
@@ -35,7 +36,16 @@ dependencies = [
 Homepage = "https://conjecta.cn"
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.24.0", "ruff>=0.6", "mypy>=1.10", "pip-audit>=2.7"]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=5.0",
+    "hypothesis>=6.100",
+    "ruff>=0.6",
+    "mypy>=1.10",
+    "pip-audit>=2.7",
+]
+redis = ["redis>=5.0"]
 mcp-servers = [
     'sagemath-mcp; python_version >= "3.12"',
     'arxiv-mcp-server; python_version >= "3.11"',
@@ -81,9 +91,79 @@ exclude = ["/math_agent/web/frontend"]
 line-length = 120
 
 [tool.ruff.lint]
-select = ["E", "F", "W"]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
 ignore = [
     "E501", # line-too-long: ~1300 pre-existing violations, enable incrementally
+]
+
+# ---------------------------------------------------------------------------
+# Baseline for the 2026-08 lint expansion (I, UP, B, SIM, RUF added to the
+# gate). Pre-existing violations are suppressed per file/directory here --
+# legacy files are NOT mass-edited and the new rules are NOT globally
+# ignored, so every path not listed below is fully gated. The new modules
+# (math_agent/tools/**, math_agent/net_safety.py, math_agent/config.py,
+# math_agent/web/state_backend.py) are deliberately absent: they are clean
+# under the expanded rules. New test files under tests/ must also be written
+# clean even though tests/** carries a baseline. Shrink this list as debt is
+# paid down; do not add new entries.
+#
+# Violations baselined (ruff 0.16.3, E501 excluded):
+#   RUF001=158 I001=77 UP037=23 UP035=20 SIM117=15 RUF012=12 RUF005=10
+#   SIM105=10 B905=9 RUF003=8 SIM108=7 B017=6 RUF059=6 SIM103=6 E741=5
+#   SIM300=5 B023=3 RUF022=3 RUF100=3 SIM114=3 UP012=3 RUF043=2 SIM102=2
+#   SIM110=2 SIM115=2 B010=1 B039=1 B904=1 RUF006=1 RUF009=1 RUF013=1
+#   UP006=1 UP032=1
+# ---------------------------------------------------------------------------
+[tool.ruff.lint.per-file-ignores]
+# math_agent/agent/ is exempted directory-wide for the newly added rule
+# families only (E/F/W stay enforced there): it is under active refactor by
+# another workstream, which owns bringing it under the full gate.
+"math_agent/agent/**" = ["B", "I", "RUF", "SIM", "UP"]
+"math_agent/billing/**" = ["SIM103", "SIM108", "UP037"]
+"math_agent/evaluation/**" = ["B905", "I001", "RUF003", "RUF005", "SIM108", "UP037"]
+"math_agent/knowledge/**" = ["RUF012", "SIM105", "UP035", "UP037"]
+"math_agent/lean/**" = [
+    "B023", "B905", "I001", "RUF001", "RUF005", "RUF012", "RUF022",
+    "SIM102", "SIM103", "SIM105", "SIM110", "SIM114", "UP035", "UP037",
+]
+"math_agent/llm/**" = ["B010", "I001", "UP035"]
+"math_agent/math_news/**" = ["I001", "SIM105", "UP037"]
+"math_agent/search/**" = ["I001"]
+"math_agent/verification/**" = ["UP037"]
+# Top-level modules are listed per file so net_safety.py / config.py stay gated.
+"math_agent/build_info.py" = ["I001"]
+"math_agent/log_config.py" = ["SIM105"]
+"math_agent/main.py" = ["I001"]
+"math_agent/mcp_config.py" = ["SIM102"]
+"math_agent/types.py" = ["UP035"]
+# math_agent/web/ is listed per file so the new state_backend.py stays gated.
+"math_agent/web/agent_factory.py" = ["I001", "SIM105"]
+"math_agent/web/app.py" = ["I001", "SIM103"]
+"math_agent/web/billing_routes.py" = ["I001"]
+"math_agent/web/contact.py" = ["SIM117"]
+"math_agent/web/dypns_client.py" = ["RUF003", "UP037"]
+"math_agent/web/friends_routes.py" = ["RUF001"]
+"math_agent/web/knowledge_cards.py" = ["RUF001"]
+"math_agent/web/knowledge_graph.py" = ["SIM103"]
+"math_agent/web/knowledge_routes.py" = ["I001", "RUF001", "UP035"]
+"math_agent/web/knowledge_selection.py" = ["I001"]
+"math_agent/web/knowledge_translation.py" = ["I001"]
+"math_agent/web/operations.py" = ["B039", "SIM108"]
+"math_agent/web/phone_auth.py" = ["I001", "RUF001"]
+"math_agent/web/project_access.py" = ["RUF001"]
+"math_agent/web/projects_routes.py" = ["B904", "RUF059"]
+"math_agent/web/project_store.py" = ["I001", "UP037"]
+"math_agent/web/public_errors.py" = ["I001", "RUF001"]
+"math_agent/web/security.py" = ["SIM103", "UP006", "UP035", "UP037"]
+"math_agent/web/solve_routes.py" = ["I001", "UP035"]
+"math_agent/web/solve_session.py" = ["I001", "RUF001", "SIM105", "UP035"]
+"math_agent/web/trace_store.py" = ["SIM105"]
+"math_agent/web/user_ban.py" = ["RUF001", "SIM103"]
+"scripts/**" = ["E741", "I001", "RUF001", "RUF100", "SIM105", "SIM115"]
+"tests/**" = [
+    "B017", "B905", "I001", "RUF001", "RUF005", "RUF012", "RUF043",
+    "RUF059", "SIM108", "SIM117", "SIM300", "UP012", "UP032", "UP035",
+    "UP037",
 ]
 
 [tool.mypy]
@@ -93,6 +173,7 @@ python_version = "3.10"
 # brought under the gate incrementally.
 files = [
     "math_agent/llm",
+    "math_agent/tools",
     "math_agent/verification",
     "math_agent/web/security.py",
 ]
@@ -108,5 +189,26 @@ ignore_errors = true
 
 # Later overrides win over the block above, re-enabling the gated modules.
 [[tool.mypy.overrides]]
-module = ["math_agent.llm.*", "math_agent.verification.*", "math_agent.web.security"]
+module = [
+    "math_agent.llm.*",
+    "math_agent.tools.*",
+    "math_agent.verification.*",
+    "math_agent.web.security",
+]
 ignore_errors = false
+
+# Deferred: builtin tool wrappers call collaborators through ToolContext
+# fields that are typed `object | None` to avoid circular imports (see the
+# TODO(refactor) in math_agent/tools/context.py). Gate this package once
+# those fields are tightened to real types.
+[[tool.mypy.overrides]]
+module = ["math_agent.tools.builtin.*"]
+ignore_errors = true
+
+# Coverage is measured in CI (pytest-cov) over the first-party package.
+[tool.coverage.run]
+source = ["math_agent"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true

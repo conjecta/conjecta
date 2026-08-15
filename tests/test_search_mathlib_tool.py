@@ -30,7 +30,7 @@ async def test_execute_action_search_mathlib(monkeypatch):
             return fake_search_by_name(name, max_results=max_results)
 
     monkeypatch.setattr(
-        "math_agent.agent.tools.default_search", FakeSearch
+        "math_agent.tools.builtin.lean_tools.default_search", FakeSearch
     )
 
     registry = ToolRegistry(enabled_tools=["search_mathlib"])
@@ -51,7 +51,7 @@ async def test_search_mathlib_no_results(monkeypatch):
             return []
 
     monkeypatch.setattr(
-        "math_agent.agent.tools.default_search", FakeSearch
+        "math_agent.tools.builtin.lean_tools.default_search", FakeSearch
     )
 
     registry = ToolRegistry(enabled_tools=["search_mathlib"])
@@ -66,7 +66,7 @@ async def test_search_mathlib_failure(monkeypatch):
     def boom():
         raise RuntimeError("mathlib4 checkout not found")
 
-    monkeypatch.setattr("math_agent.agent.tools.default_search", boom)
+    monkeypatch.setattr("math_agent.tools.builtin.lean_tools.default_search", boom)
 
     registry = ToolRegistry(enabled_tools=["search_mathlib"])
     result = await registry.call("search_mathlib", "Nat.Prime", ToolContext())
@@ -96,7 +96,7 @@ async def test_search_mathlib_does_not_block_event_loop(monkeypatch):
         def search_by_type_snippet(self, snippet: str, *, max_results: int = 10):
             return fast_search_by_type_snippet(snippet, max_results=max_results)
 
-    monkeypatch.setattr("math_agent.agent.tools.default_search", FakeSearch)
+    monkeypatch.setattr("math_agent.tools.builtin.lean_tools.default_search", FakeSearch)
 
     async def background_task():
         await asyncio.sleep(0.05)

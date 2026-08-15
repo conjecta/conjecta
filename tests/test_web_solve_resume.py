@@ -70,7 +70,7 @@ async def test_cloud_enabled_checkpoint_resume_uses_tenant_local_store(monkeypat
     monkeypatch.setattr(web_app, "_build_agent", build_agent)
     monkeypatch.setattr(web_app, "_maybe_knowledge_store", lambda user_id=None: cloud_store)
     monkeypatch.setattr(web_app, "_project_store", lambda user_id=None: local_store)
-    monkeypatch.setattr(web_app, "default_model_string", lambda config: "openai/gpt-5.6-sol")
+    monkeypatch.setattr(web_app, "default_model_string", lambda config: "openai/test")
     monkeypatch.setattr(web_app, "prefix_history", lambda problem, history: problem)
     monkeypatch.setattr(
         web_app,
@@ -541,7 +541,7 @@ async def test_transport_disconnect_with_cancel_flag_marks_run_cancelled(monkeyp
         "_project_store",
         lambda user_id=None: SimpleNamespace(get_checkpoint=lambda cid: None),
     )
-    monkeypatch.setattr(web_app, "default_model_string", lambda config: "openai/gpt-5.6-sol")
+    monkeypatch.setattr(web_app, "default_model_string", lambda config: "openai/test")
 
     stream = solve_session.stream_solve_events(
         {"problem": "Prove P", "mode": "react", "_cancel_research": True}
@@ -552,3 +552,6 @@ async def test_transport_disconnect_with_cancel_flag_marks_run_cancelled(monkeyp
 
     finish_run.assert_awaited_once()
     assert finish_run.await_args.kwargs["status"] == "cancelled"
+
+
+

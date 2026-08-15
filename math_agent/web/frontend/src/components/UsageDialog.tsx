@@ -16,17 +16,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 
-const PROVIDERS = [
-  { value: 'openai', label: 'OpenAI' },
-];
+const USER_MODEL_LABEL = 'gpt-5.6-sol';
 
 export function UsageDialog({
   onClose,
@@ -37,7 +28,7 @@ export function UsageDialog({
 }) {
   const [usage, setUsage] = useState<UsageSummary | null>(null);
   const [apiKey, setApiKey] = useState<ApiKeyInfo | null>(null);
-  const [provider, setProvider] = useState('openai');
+  const [baseUrl, setBaseUrl] = useState('');
   const [inputKey, setInputKey] = useState('');
   const [error, setError] = useState<string | null>(null);
   const quotaExceeded = reason === 'quota_exceeded';
@@ -58,7 +49,10 @@ export function UsageDialog({
 
     fetchApiKey()
       .then((data) => {
-        if (mounted) setApiKey(data);
+        if (mounted) {
+          setApiKey(data);
+          if (data?.base_url) setBaseUrl(data.base_url);
+        }
       })
       .catch((err) => {
         if (mounted) {
@@ -72,15 +66,22 @@ export function UsageDialog({
   }, []);
 
   const handleSave = async () => {
+    const trimmedBaseUrl = baseUrl.trim();
     const trimmed = inputKey.trim();
-    if (!trimmed) return;
+    if (!trimmedBaseUrl || !trimmed) return;
     setError(null);
     try {
-      const info = await saveApiKey(provider, trimmed);
+      const parsed = new URL(trimmedBaseUrl);
+      if (parsed.protocol !== 'https:') {
+        setError('Base URL 必须使用 HTTPS');
+        return;
+      }
+      const info = await saveApiKey(trimmedBaseUrl, trimmed);
       setApiKey(info);
+      setBaseUrl(info.base_url || trimmedBaseUrl);
       setInputKey('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save API key');
+      setError(err instanceof Error ? err.message : 'Base URL 或 API Key 保存失败');
     }
   };
 
@@ -119,7 +120,7 @@ export function UsageDialog({
           >
             <p className="font-semibold">今日免费额度已用完</p>
             <p className="mt-1 text-xs opacity-90">
-              绑定 OpenAI API Key 后，将按你自己的额度计费，不再占用平台免费配额。
+              绑定 OpenAI 兼容 Base URL 和 API Key 后，将按你自己的额度计费，不再占用平台免费配额。
             </p>
           </div>
         )}
@@ -158,28 +159,47 @@ export function UsageDialog({
         )}
 
         <div className="space-y-3">
-          <Select value={provider} onValueChange={setProvider}>
-            <SelectTrigger className="w-full" aria-label="选择 API 提供商">
-              <SelectValue placeholder="选择提供商" />
-            </SelectTrigger>
-            <SelectContent>
-              {PROVIDERS.map((p) => (
-                <SelectItem key={p.value} value={p.value}>
-                  {p.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="space-y-1">
+            <label htmlFor="api-base-url" className="text-xs font-medium">
+              Base URL
+            </label>
+            <Input
+              id="api-base-url"
+              type="url"
+              inputMode="url"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              placeholder="https://provider.example/v1"
+              value={baseUrl}
+              onChange={(e) => setBaseUrl(e.target.value)}
+            />
+          </div>
 
-          <Input
-            type="password"
-            placeholder="输入 API key"
-            value={inputKey}
-            onChange={(e) => setInputKey(e.target.value)}
-          />
+          <div className="space-y-1">
+            <label htmlFor="api-key" className="text-xs font-medium">
+              API Key
+            </label>
+            <Input
+              id="api-key"
+              type="password"
+              placeholder="输入 API Key"
+              value={inputKey}
+              onChange={(e) => setInputKey(e.target.value)}
+            />
+          </div>
+
+          <div className="flex items-center justify-between rounded border border-border px-2.5 py-2 text-xs">
+            <span className="text-muted-foreground">模型</span>
+            <span className="font-medium">{USER_MODEL_LABEL}</span>
+          </div>
 
           <div className="flex gap-2">
-            <Button type="button" onClick={handleSave} disabled={!inputKey.trim()}>
+            <Button
+              type="button"
+              onClick={handleSave}
+              disabled={!baseUrl.trim() || !inputKey.trim()}
+            >
               保存
             </Button>
             {apiKey && (
@@ -191,7 +211,9 @@ export function UsageDialog({
 
           {apiKey && (
             <p className="text-xs text-muted-foreground">
-              已绑定 {apiKey.provider}，更新于 {new Date(apiKey.updated_at).toLocaleString()}
+              {apiKey.requires_rebind
+                ? '旧版平台配置需要重新填写 Base URL 和 API Key'
+                : `已绑定 ${apiKey.base_url}${apiKey.updated_at ? `，更新于 ${new Date(apiKey.updated_at).toLocaleString()}` : ''}`}
             </p>
           )}
         </div>

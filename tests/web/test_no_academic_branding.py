@@ -1,7 +1,7 @@
 from pathlib import Path
 
 WEB = Path(__file__).resolve().parents[2] / "web"
-BANNED = ["team.html", "Fudan", "复旦", "Shanghai Center for Mathematical Sciences", "上海数学中心"]
+BANNED = ["team.html", "Fudan", "复旦", "wangt1anyu", "Shanghai Center for Mathematical Sciences", "上海数学中心"]
 
 
 def test_no_banned_strings_in_web():

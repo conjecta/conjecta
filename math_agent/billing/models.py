@@ -50,5 +50,8 @@ class UsageRecord:
 
 @dataclass(frozen=True)
 class StoredApiKey:
-    provider: str
     api_key: str
+    base_url: str = ""
+    # Populated only when decrypting the legacy v1 provider-based payload.
+    # Legacy records must be rebound before they can be used for a solve.
+    legacy_provider: str = ""

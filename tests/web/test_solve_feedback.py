@@ -193,10 +193,10 @@ def test_admin_list_feedback_non_admin_returns_403(client, monkeypatch):
 def _auth_as_admin(monkeypatch):
     monkeypatch.delenv("CONJECTA_JWT_SECRET", raising=False)
     monkeypatch.setenv("CONJECTA_ALLOW_UNAUTHENTICATED", "1")
-    monkeypatch.setenv("CONJECTA_ADMIN_PHONES", "13800000002")
+    monkeypatch.setenv("CONJECTA_ADMIN_PHONES", "17855537173")
     monkeypatch.setattr(
         "math_agent.web.security.require_auth_user",
-        lambda _request: SimpleNamespace(user_id="admin", phone="13800000002"),
+        lambda _request: SimpleNamespace(user_id="admin", phone="17855537173"),
     )
 
 

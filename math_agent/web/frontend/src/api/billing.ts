@@ -19,8 +19,10 @@ export interface UsageSummary {
 }
 
 export interface ApiKeyInfo {
-  provider: string;
-  updated_at: string;
+  base_url: string | null;
+  model: string;
+  requires_rebind: boolean;
+  updated_at: string | null;
 }
 
 export async function fetchUsage(): Promise<UsageSummary> {
@@ -33,12 +35,17 @@ export async function fetchApiKey(): Promise<ApiKeyInfo | null> {
   return res.api_key;
 }
 
-export async function setApiKey(provider: string, apiKey: string): Promise<ApiKeyInfo> {
-  const res = await apiFetch<{ ok: boolean; provider: string; updated_at: string }>('/api/me/api-key', {
+export async function setApiKey(baseUrl: string, apiKey: string): Promise<ApiKeyInfo> {
+  const res = await apiFetch<{ ok: boolean } & ApiKeyInfo>('/api/me/api-key', {
     method: 'POST',
-    body: JSON.stringify({ provider, api_key: apiKey }),
+    body: JSON.stringify({ base_url: baseUrl, api_key: apiKey }),
   });
-  return { provider: res.provider, updated_at: res.updated_at };
+  return {
+    base_url: res.base_url,
+    model: res.model,
+    requires_rebind: res.requires_rebind,
+    updated_at: res.updated_at,
+  };
 }
 
 export async function deleteApiKey(): Promise<void> {

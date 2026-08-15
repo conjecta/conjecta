@@ -212,17 +212,9 @@ def mathlib_package_dir(workspace: Path = WORKSPACE_DIR) -> Path:
     return workspace / ".lake/packages/mathlib4"
 
 
-def existing_imports(
-    modules: list[str] | tuple[str, ...],
-    *,
-    package_dir: Path | None = None,
-) -> list[str]:
-    """Keep only modules that exist in a mathlib source tree.
-
-    ``package_dir`` makes the filesystem dependency explicit for unit tests;
-    production builds default to the repository's pinned Lean workspace.
-    """
-    root = package_dir or mathlib_package_dir()
+def existing_imports(modules: list[str] | tuple[str, ...]) -> list[str]:
+    """Keep only modules that exist in the pinned mathlib source tree."""
+    root = mathlib_package_dir()
     kept = []
     for module in modules:
         rel = Path(*module.split(".")).with_suffix(".lean")
@@ -274,7 +266,6 @@ def verify_statements(
     jobs: int = 2,
     batch_size: int = 25,
     library_path: str | None = None,
-    mathlib_dir: Path | None = None,
     cache_path: Path | None = None,
 ) -> tuple[dict[str, list[str]], dict[str, str]]:
     """Elaborate every statement against the local mathlib toolchain.
@@ -286,8 +277,8 @@ def verify_statements(
     where it stopped.
     """
     library_path = library_path or lean_library_path()
-    standard = existing_imports(list(STANDARD_IMPORTS), package_dir=mathlib_dir)
-    fallbacks = existing_imports(list(FALLBACK_IMPORTS), package_dir=mathlib_dir)
+    standard = existing_imports(list(STANDARD_IMPORTS))
+    fallbacks = existing_imports(list(FALLBACK_IMPORTS))
     cache = VerifyCache(cache_path)
     pending: dict[str, Statement] = {}
     imports_by_name: dict[str, list[str]] = {}

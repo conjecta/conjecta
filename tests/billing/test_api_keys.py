@@ -1,12 +1,15 @@
 import base64
+import json
+import secrets
 
 import pytest
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from math_agent.billing.api_keys import (
+    USER_API_MODEL,
+    USER_API_PROVIDER,
     decrypt_api_key,
     encrypt_api_key,
-    get_user_backend_model,
-    USER_MODEL_MAP,
 )
 
 
@@ -19,31 +22,42 @@ def _set_key(monkeypatch):
 
 
 def test_roundtrip():
-    ct = encrypt_api_key("openai", "sk-test")
+    ct = encrypt_api_key("https://api.example.com/v1", "sk-test")
     assert ct != "sk-test"
-    assert ct.startswith("v1:")
+    assert ct.startswith("v2:")
     key = decrypt_api_key(ct)
-    assert key.provider == "openai"
+    assert key.base_url == "https://api.example.com/v1"
     assert key.api_key == "sk-test"
+    assert key.legacy_provider == ""
 
 
-def test_user_model_map():
-    assert USER_MODEL_MAP == {"openai": "gpt-5.6-sol"}
+def test_fixed_user_endpoint_identity():
+    assert USER_API_MODEL == "gpt-5.6-sol"
+    assert USER_API_PROVIDER == "user_endpoint"
 
 
-def test_get_user_backend_model():
-    assert get_user_backend_model("openai") == "gpt-5.6-sol"
+def test_decrypts_legacy_provider_payload():
+    key = base64.urlsafe_b64decode(
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".encode()
+    )
+    nonce = secrets.token_bytes(12)
+    payload = json.dumps({"provider": "openai", "api_key": "sk-old"}).encode()
+    ciphertext = AESGCM(key).encrypt(nonce, payload, None)
+    stored = "v1:{}:{}".format(
+        base64.urlsafe_b64encode(nonce).decode(),
+        base64.urlsafe_b64encode(ciphertext).decode(),
+    )
 
-
-def test_get_user_backend_model_unsupported():
-    with pytest.raises(ValueError, match="Unsupported provider"):
-        get_user_backend_model("unknown")
+    decrypted = decrypt_api_key(stored)
+    assert decrypted.api_key == "sk-old"
+    assert decrypted.base_url == ""
+    assert decrypted.legacy_provider == "openai"
 
 
 def test_missing_encryption_key(monkeypatch):
     monkeypatch.delenv("CONJECTA_API_KEY_ENCRYPTION_KEY", raising=False)
     with pytest.raises(RuntimeError, match="CONJECTA_API_KEY_ENCRYPTION_KEY is not set"):
-        encrypt_api_key("openai", "sk-test")
+        encrypt_api_key("https://api.example.com/v1", "sk-test")
 
 
 def test_wrong_encryption_key_length(monkeypatch):
@@ -52,11 +66,11 @@ def test_wrong_encryption_key_length(monkeypatch):
         base64.urlsafe_b64encode(b"short").decode(),
     )
     with pytest.raises(ValueError, match="32 bytes"):
-        encrypt_api_key("openai", "sk-test")
+        encrypt_api_key("https://api.example.com/v1", "sk-test")
 
 
 def test_tampered_ciphertext():
-    ct = encrypt_api_key("openai", "sk-test")
+    ct = encrypt_api_key("https://api.example.com/v1", "sk-test")
     tampered = ct[:-1] + ("X" if ct[-1] != "X" else "Y")
     with pytest.raises(ValueError):
         decrypt_api_key(tampered)

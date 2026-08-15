@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 
 import pytest
 from unittest.mock import AsyncMock
@@ -102,7 +104,7 @@ async def test_searching_uses_llm(monkeypatch):
     monkeypatch.setattr("math_agent.search.tavily.tavily_search", fake_tavily)
     monkeypatch.setattr("math_agent.search.duckduckgo.duckduckgo_search", fake_ddg)
     monkeypatch.setattr(
-        "math_agent.agent.tools._llm_search_content", fake_search_content
+        "math_agent.tools.builtin.search._llm_search_content", fake_search_content
     )
     registry = ToolRegistry(enabled_tools=["searching"])
     result = await registry.call(
@@ -153,7 +155,7 @@ async def test_fetch_url_tool_registered_and_fetches_content(monkeypatch):
             content=b"<html><body><p>Important math content here.</p></body></html>",
         )
 
-    monkeypatch.setattr("math_agent.agent.tools.fetch_public_url", fake_fetch)
+    monkeypatch.setattr("math_agent.tools.builtin.search.fetch_public_url", fake_fetch)
     registry = ToolRegistry(enabled_tools=["fetch_url"])
     assert "fetch_url" in registry.available
     result = await registry.call(
@@ -171,7 +173,7 @@ async def test_search_web_alias_uses_real_search(monkeypatch):
     async def fake_search(query: str, **kwargs: object) -> str:
         return f"web results for {query}"
 
-    monkeypatch.setattr("math_agent.agent.tools._search", fake_search)
+    monkeypatch.setattr("math_agent.tools.builtin.search._search", fake_search)
     registry = ToolRegistry(enabled_tools=["search"])
     action = Action(name="search_web", args={"query": "Riemann hypothesis"})
     obs = await registry.execute_action(action, ToolContext())
@@ -464,7 +466,7 @@ async def test_formalize_tool_uses_premise_retriever(monkeypatch):
         captured["lean_codegen"] = lean_codegen
         return "PASSED", "theorem t : True := by trivial"
 
-    monkeypatch.setattr("math_agent.agent.tools.formalize_statement", fake_formalize)
+    monkeypatch.setattr("math_agent.tools.lean.formalize_statement", fake_formalize)
     registry = ToolRegistry(
         enabled_tools=["formalize"],
         lean_codegen=original_codegen,
@@ -491,3 +493,118 @@ async def test_lean_check_rejects_umbrella_mathlib_import():
     assert result.success is False
     assert "umbrella" in result.output
     registry._lean_runner.check_proof.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_call_records_stats_when_tool_raises():
+    async def boom(_args: str, _ctx: ToolContext) -> ToolResult:
+        raise RuntimeError("internal secret: db password is hunter2")
+
+    registry = ToolRegistry(enabled_tools=[])
+    registry.register(
+        "boom",
+        boom,
+        description="always raises",
+        args_example='{"value": "..."}',
+        arg_map="value",
+    )
+
+    result = await registry.call("boom", '{"value": "1"}', ToolContext())
+    assert result.success is False
+
+    stats = registry.tool_stats["boom"]
+    assert stats["calls"] == 1
+    assert stats["failures"] == 1
+    assert stats["wall_seconds"] >= 0.0
+
+
+@pytest.mark.asyncio
+async def test_call_info_logs_do_not_leak_raw_args(caplog):
+    secret_payload = "prove the secret theorem about zeta-private-123"
+
+    async def echo(value: str, _ctx: ToolContext) -> ToolResult:
+        return ToolResult(name="echo", output=value, success=True)
+
+    registry = ToolRegistry(enabled_tools=[])
+    registry.register(
+        "echo",
+        echo,
+        description="echo the value",
+        args_example='{"value": "..."}',
+        arg_map="value",
+    )
+
+    with caplog.at_level(logging.INFO, logger="math_agent.tools"):
+        result = await registry.call(
+            "echo", json.dumps({"value": secret_payload}), ToolContext()
+        )
+
+    assert result.success is True
+    info_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelno == logging.INFO
+    ]
+    assert info_messages
+    assert all(secret_payload not in message for message in info_messages)
+    # Nothing derived from the args payload (keys or values) may be logged.
+    assert all("arg_keys" not in message for message in info_messages)
+    assert any("Tool call start: name=echo" in message for message in info_messages)
+
+
+@pytest.mark.asyncio
+async def test_call_error_result_hides_internal_exception_text(caplog):
+    internal_detail = "connection to 10.0.0.7 refused: auth token abc123"
+
+    async def boom(_args: str, _ctx: ToolContext) -> ToolResult:
+        raise RuntimeError(internal_detail)
+
+    registry = ToolRegistry(enabled_tools=[])
+    registry.register(
+        "boom",
+        boom,
+        description="always raises",
+        args_example='{"value": "..."}',
+        arg_map="value",
+    )
+
+    with caplog.at_level(logging.INFO, logger="math_agent.tools"):
+        result = await registry.call("boom", '{"value": "1"}', ToolContext())
+
+    assert result.success is False
+    assert internal_detail not in result.output
+    assert "boom" in result.output
+    # Full detail stays in the logs for debugging.
+    assert any(internal_detail in record.getMessage() or
+               (record.exc_info and internal_detail in str(record.exc_info[1]))
+               for record in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_call_cancelled_error_propagates_but_updates_stats():
+    started = asyncio.Event()
+
+    async def slow(_args: str, _ctx: ToolContext) -> ToolResult:
+        started.set()
+        await asyncio.sleep(60)
+        return ToolResult(name="slow", output="done", success=True)
+
+    registry = ToolRegistry(enabled_tools=[])
+    registry.register(
+        "slow",
+        slow,
+        description="sleeps",
+        args_example='{"value": "..."}',
+        arg_map="value",
+    )
+
+    task = asyncio.ensure_future(registry.call("slow", '{"value": "1"}', ToolContext()))
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    stats = registry.tool_stats["slow"]
+    assert stats["calls"] == 1
+    assert stats["failures"] == 0
+    assert stats["wall_seconds"] >= 0.0

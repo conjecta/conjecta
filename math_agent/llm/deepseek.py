@@ -26,16 +26,22 @@ log = logging.getLogger("math_agent.llm.deepseek")
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEFAULT_MODEL = "deepseek-chat"
 
-# Public model names sent directly to the DeepSeek API.
-_MODEL_MAP: dict[str, tuple[str, bool]] = {
+# Legacy / alias names sent directly to the DeepSeek API.
+_LEGACY_MODEL_MAP: dict[str, tuple[str, bool]] = {
     "deepseek-chat": ("deepseek-chat", False),
     "deepseek-reasoner": ("deepseek-reasoner", True),
 }
 
+# v4 models that support thinking mode
+_THINKING_MODELS = frozenset({"deepseek-v4-pro", "deepseek-v4-flash"})
+
 
 def _resolve_model(model: str) -> tuple[str, bool]:
     """Return (api_model, thinking_enabled)."""
-    return _MODEL_MAP.get(model, (model, False))
+    if model in _LEGACY_MODEL_MAP:
+        return _LEGACY_MODEL_MAP[model]
+    thinking = model in _THINKING_MODELS
+    return model, thinking
 
 
 def _extract_content(message: Any) -> str:

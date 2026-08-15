@@ -58,6 +58,12 @@ from math_agent.agent.reviewers import (
     Reviewer,
     StatementFidelityReviewer,
 )
+from math_agent.agent.runtime import (
+    SolveContext,
+    llm_calls_exhausted,
+    tool_calls_exhausted,
+    wall_clock_deadline,
+)
 from math_agent.agent.state import ReasoningState, ReasoningStep, StepType
 from math_agent.agent.research_artifacts import _safe_component
 from math_agent.agent.tools import ToolContext, ToolRegistry
@@ -289,6 +295,49 @@ class ReActAgent:
         human_decision: dict[str, Any] | None = None,
         session_id: str | None = None,
     ) -> ReActSolution:
+        """Solve one problem by sequencing the solve phases.
+
+        Orchestration only: intake/setup (trace hydration, budgets, conclude
+        gate, up-front planning), resume of a pending human decision, the
+        act loop, then finalization. All per-solve mutable state lives on
+        :class:`SolveContext` (see ``math_agent.agent.runtime``).
+        """
+        ctx = await self._begin_solve(
+            problem,
+            on_event=on_event,
+            session_log=session_log,
+            on_checkpoint=on_checkpoint,
+            plan_text=plan_text,
+            initial_goal=initial_goal,
+            attachments=attachments,
+            require_formal_verification=require_formal_verification,
+            initial_trace=initial_trace,
+            human_decision=human_decision,
+            session_id=session_id,
+        )
+        resumed = await self._apply_pending_human_decision(ctx)
+        if resumed is not None:
+            return resumed
+        self._derive_loop_state(ctx)
+        await self._run_react_loop(ctx)
+        return await self._finalize_solve(ctx)
+
+    async def _begin_solve(
+        self,
+        problem: str,
+        *,
+        on_event: EventCallback | None,
+        session_log: logging.Logger | None,
+        on_checkpoint: Callable[[dict[str, Any]], None] | None,
+        plan_text: str,
+        initial_goal: str,
+        attachments: list[dict] | None,
+        require_formal_verification: bool,
+        initial_trace: ReActTrace | None,
+        human_decision: dict[str, Any] | None,
+        session_id: str | None,
+    ) -> SolveContext:
+        """Intake phase: hydrate the trace, wire budgets and the conclude gate."""
         self._easy_verdict = None
         self._figure_dir, self._figure_url_prefix = self._prepare_figure_dir(
             session_id
@@ -340,15 +389,7 @@ class ReActAgent:
         # Show the root goal in the live DAG panel from the very start.
         await self._emit_proof_graph_if_changed(trace, emit)
 
-        final_answer = ""
-        candidate_answer = ""
-        accepted_formal_evidence_id = ""
         outcome = outcome_best_effort()
-        verification_status = legacy_label(outcome)
-        verification_issues: list[str] = []
-        terminated_without_synthesis = False
-        wall_time_exhausted = False
-        llm_budget_exhausted = False
         # Per-problem LLM call budget (llm.max_calls_per_problem), enforced
         # alongside the wall-clock deadline below. The backend carries the
         # configured value (see llm.factory); tests with fake backends fall
@@ -359,200 +400,233 @@ class ReActAgent:
         )
         self._llm_call_counter.reset()
         max_wall_seconds = max(0.0, float(self.config.max_wall_seconds))
-        deadline = asyncio.get_running_loop().time() + max_wall_seconds
-        conclude_gate = ConcludeGate(
+        ctx = SolveContext(
+            problem=problem,
+            on_checkpoint=on_checkpoint,
+            attachments=attachments,
+            require_formal_verification=require_formal_verification,
+            human_decision=human_decision,
+            trace=trace,
+            run_log=run_log,
+            emit=emit,
+            goal_run=goal_run,
+            goal_evaluator=goal_evaluator,
+            deadline=wall_clock_deadline(max_wall_seconds),
+            max_wall_seconds=max_wall_seconds,
+            max_llm_calls=max_llm_calls,
+            outcome=outcome,
+            verification_status=legacy_label(outcome),
+        )
+        ctx.conclude_gate = ConcludeGate(
             self,
             run_log=run_log,
             emit=emit,
             on_checkpoint=on_checkpoint,
-            deadline=deadline,
+            deadline=ctx.deadline,
             goal_run=goal_run,
             goal_evaluator=goal_evaluator,
             require_formal_verification=require_formal_verification,
         )
 
-        await self._maybe_plan(trace, run_log, emit, deadline)
-        await self._maybe_claim_check(trace, run_log, emit, deadline)
+        await self._maybe_plan(trace, run_log, emit, ctx.deadline)
+        await self._maybe_claim_check(trace, run_log, emit, ctx.deadline)
+        return ctx
 
-        if trace.pending_interaction:
-            matched = matching_decision(trace, human_decision)
-            if matched is None:
-                pause_for_human(trace, trace.pending_interaction)
-            pending, decision = matched
-            kind = str(pending.get("kind") or "")
-            details = (
-                pending.get("details")
-                if isinstance(pending.get("details"), dict)
-                else {}
+    async def _apply_pending_human_decision(
+        self, ctx: SolveContext
+    ) -> ReActSolution | None:
+        """Resume phase: apply a human decision to a pending HITL interaction.
+
+        Returns an early solution when the human approved a reviewer-blocked
+        conclusion; otherwise None and the act loop goes ahead.
+        """
+        trace = ctx.trace
+        if not trace.pending_interaction:
+            return None
+        run_log = ctx.run_log
+        emit = ctx.emit
+        matched = matching_decision(trace, ctx.human_decision)
+        if matched is None:
+            pause_for_human(trace, trace.pending_interaction)
+        pending, decision = matched
+        kind = str(pending.get("kind") or "")
+        details = (
+            pending.get("details")
+            if isinstance(pending.get("details"), dict)
+            else {}
+        )
+        if kind == "reviewer_block" and decision["decision"] == "approve":
+            record_decision(trace, decision)
+            ctx.checkpoint()
+            trace.tool_stats = self.tools.tool_stats
+            return ReActSolution(
+                problem=ctx.problem,
+                turns=trace.turns,
+                final_answer=str(
+                    details.get("candidate_answer") or best_effort_answer(trace)
+                ),
+                verification_status=legacy_label(outcome_best_effort()),
+                verification_issues=[
+                    str(item) for item in (details.get("issues") or [])
+                ],
+                trace=trace,
+                llm_call_count=self._llm_call_counter.calls,
+                verification_outcome=outcome_best_effort(),
             )
-            if kind == "reviewer_block" and decision["decision"] == "approve":
-                record_decision(trace, decision)
-                if on_checkpoint:
-                    on_checkpoint(_trace_snapshot(trace, strategy="react"))
-                trace.tool_stats = self.tools.tool_stats
-                return ReActSolution(
-                    problem=problem,
-                    turns=trace.turns,
-                    final_answer=str(
-                        details.get("candidate_answer") or best_effort_answer(trace)
-                    ),
-                    verification_status=legacy_label(outcome_best_effort()),
-                    verification_issues=[
-                        str(item) for item in (details.get("issues") or [])
-                    ],
-                    trace=trace,
-                    llm_call_count=self._llm_call_counter.calls,
-                    verification_outcome=outcome_best_effort(),
-                )
-            if kind == "tool_approval":
-                raw_action = (
-                    details.get("action") if isinstance(details, dict) else None
-                )
-                if decision["decision"] == "edit" and isinstance(
-                    decision.get("edited_action"), dict
+        if kind == "tool_approval":
+            raw_action = (
+                details.get("action") if isinstance(details, dict) else None
+            )
+            if decision["decision"] == "edit" and isinstance(
+                decision.get("edited_action"), dict
+            ):
+                raw_action = decision["edited_action"]
+            if not isinstance(raw_action, dict):
+                raise ValueError("Pending tool approval is missing its action.")
+            action = Action(
+                name=str(raw_action.get("name") or ""),
+                args=(
+                    dict(raw_action.get("args") or {})
+                    if isinstance(raw_action.get("args"), dict)
+                    else {}
+                ),
+            )
+            validation_error = self._validate_action(action)
+            if validation_error is not None:
+                raise ValueError(validation_error[1])
+            step_num = max(
+                trace.next_step_num,
+                int(details.get("step_num") or trace.next_step_num),
+            )
+            if decision["decision"] in {"approve", "edit"}:
+                current_tool_calls = trace.budget_consumption.get("tool_calls", 0)
+                if tool_calls_exhausted(
+                    current_tool_calls, self.config.max_tool_calls
                 ):
-                    raw_action = decision["edited_action"]
-                if not isinstance(raw_action, dict):
-                    raise ValueError("Pending tool approval is missing its action.")
-                action = Action(
-                    name=str(raw_action.get("name") or ""),
-                    args=(
-                        dict(raw_action.get("args") or {})
-                        if isinstance(raw_action.get("args"), dict)
-                        else {}
+                    observation = ToolObservation(
+                        success=False,
+                        output=(
+                            f"Tool-call budget exhausted after {current_tool_calls} "
+                            "consumed calls; human-approved action was not executed."
+                        ),
+                        error="tool_call_budget_exhausted",
+                    )
+                else:
+                    await emit(
+                        {
+                            "type": "tool_start",
+                            "step_num": step_num,
+                            "tool": action.name,
+                            "args_preview": _preview_action_args(
+                                action.args,
+                                limit=2000 if action.name == "compute" else 240,
+                            ),
+                            "human_approved": True,
+                        }
+                    )
+                    observation = await _await_phase(
+                        self._execute_with_heartbeat(action, trace, emit, step_num),
+                        deadline=ctx.deadline,
+                        run_log=run_log,
+                        phase="tool_execution",
+                        model_role="main",
+                    )
+                    trace.budget_consumption["tool_calls"] = current_tool_calls + 1
+                    observation = attach_formal_evidence(
+                        action,
+                        observation,
+                        target_claim=trace.current_goal or trace.problem,
+                    )
+                    if action.name in FORMAL_ACTIONS:
+                        trace.proof_graph.record_formal_attempt(
+                            success=observation.success,
+                            evidence_id=evidence_id_from_observation(observation),
+                            issue=observation.error
+                            or (
+                                ""
+                                if observation.success
+                                else observation.output[:500]
+                            ),
+                        )
+                    await emit(
+                        {
+                            "type": "tool_done",
+                            "step_num": step_num,
+                            "tool": action.name,
+                            "success": observation.success,
+                            "output": observation.output[:2000],
+                            "error": observation.error,
+                        }
+                    )
+            else:
+                feedback = decision.get("feedback") or "No reason supplied."
+                observation = ToolObservation(
+                    success=decision["decision"] == "respond",
+                    output=f"Human {decision['decision']}: {feedback}",
+                    error=(
+                        None
+                        if decision["decision"] == "respond"
+                        else "human_rejected"
                     ),
                 )
-                validation_error = self._validate_action(action)
-                if validation_error is not None:
-                    raise ValueError(validation_error[1])
-                step_num = max(
-                    trace.next_step_num,
-                    int(details.get("step_num") or trace.next_step_num),
-                )
-                if decision["decision"] in {"approve", "edit"}:
-                    current_tool_calls = trace.budget_consumption.get("tool_calls", 0)
-                    if current_tool_calls >= self.config.max_tool_calls:
-                        observation = ToolObservation(
-                            success=False,
-                            output=(
-                                f"Tool-call budget exhausted after {current_tool_calls} "
-                                "consumed calls; human-approved action was not executed."
-                            ),
-                            error="tool_call_budget_exhausted",
-                        )
-                    else:
-                        await emit(
-                            {
-                                "type": "tool_start",
-                                "step_num": step_num,
-                                "tool": action.name,
-                                "args_preview": _preview_action_args(
-                                    action.args,
-                                    limit=2000 if action.name == "compute" else 240,
-                                ),
-                                "human_approved": True,
-                            }
-                        )
-                        observation = await _await_phase(
-                            self._execute_with_heartbeat(action, trace, emit, step_num),
-                            deadline=deadline,
-                            run_log=run_log,
-                            phase="tool_execution",
-                            model_role="main",
-                        )
-                        trace.budget_consumption["tool_calls"] = current_tool_calls + 1
-                        observation = attach_formal_evidence(
-                            action,
-                            observation,
-                            target_claim=trace.current_goal or trace.problem,
-                        )
-                        if action.name in FORMAL_ACTIONS:
-                            trace.proof_graph.record_formal_attempt(
-                                success=observation.success,
-                                evidence_id=evidence_id_from_observation(observation),
-                                issue=observation.error
-                                or (
-                                    ""
-                                    if observation.success
-                                    else observation.output[:500]
-                                ),
-                            )
-                        await emit(
-                            {
-                                "type": "tool_done",
-                                "step_num": step_num,
-                                "tool": action.name,
-                                "success": observation.success,
-                                "output": observation.output[:2000],
-                                "error": observation.error,
-                            }
-                        )
-                else:
-                    feedback = decision.get("feedback") or "No reason supplied."
-                    observation = ToolObservation(
-                        success=decision["decision"] == "respond",
-                        output=f"Human {decision['decision']}: {feedback}",
-                        error=(
-                            None
-                            if decision["decision"] == "respond"
-                            else "human_rejected"
-                        ),
-                    )
-                turn = ReActTurn(
-                    thought="Apply the recorded human decision to the pending action.",
-                    action=action,
-                    observation=observation,
+            turn = ReActTurn(
+                thought="Apply the recorded human decision to the pending action.",
+                action=action,
+                observation=observation,
+                step_num=step_num,
+            )
+            trace.turns.append(turn)
+            trace.next_step_num = step_num + 1
+            await self._emit_turn(turn, emit, trace)
+        elif kind == "reviewer_block":
+            feedback = (
+                decision.get("feedback") or "Revise the answer before concluding."
+            )
+            step_num = trace.next_step_num
+            trace.turns.append(
+                ReActTurn(
+                    thought="Human guidance after reviewer escalation.",
+                    action=Action(name="think", args={"text": feedback}),
+                    observation=ToolObservation(
+                        success=True,
+                        output=f"Human feedback: {feedback}",
+                    ),
                     step_num=step_num,
                 )
-                trace.turns.append(turn)
-                trace.next_step_num = step_num + 1
-                await self._emit_turn(turn, emit, trace)
-            elif kind == "reviewer_block":
-                feedback = (
-                    decision.get("feedback") or "Revise the answer before concluding."
-                )
-                step_num = trace.next_step_num
-                trace.turns.append(
-                    ReActTurn(
-                        thought="Human guidance after reviewer escalation.",
-                        action=Action(name="think", args={"text": feedback}),
-                        observation=ToolObservation(
-                            success=True,
-                            output=f"Human feedback: {feedback}",
-                        ),
-                        step_num=step_num,
-                    )
-                )
-                trace.next_step_num = step_num + 1
-            record_decision(trace, decision)
-            if on_checkpoint:
-                on_checkpoint(_trace_snapshot(trace, strategy="react"))
+            )
+            trace.next_step_num = step_num + 1
+        record_decision(trace, decision)
+        ctx.checkpoint()
+        return None
+
+    def _derive_loop_state(self, ctx: SolveContext) -> None:
+        """Rebuild budget counters and the step cursor from a (resumed) trace."""
+        trace = ctx.trace
         prior_conclusions = [
             turn
             for turn in trace.turns
             if turn.action.name == "conclude"
             and turn.observation.error not in _NON_CONSUMING_TOOL_ERRORS
         ]
-        conclusion_revisions = max(
+        ctx.conclusion_revisions = max(
             len(prior_conclusions),
             trace.budget_consumption.get("conclusion_revisions", 0),
         )
-        conclusion_budget_exhausted = (
+        ctx.conclusion_budget_exhausted = (
             self.config.max_conclusion_revisions >= 0
-            and conclusion_revisions > self.config.max_conclusion_revisions
+            and ctx.conclusion_revisions > self.config.max_conclusion_revisions
         )
-        if conclusion_budget_exhausted and prior_conclusions:
+        if ctx.conclusion_budget_exhausted and prior_conclusions:
             latest_conclusion = prior_conclusions[-1]
-            candidate_answer = latest_conclusion.action.args.get("answer", "")
-            verification_issues = list(
+            ctx.candidate_answer = latest_conclusion.action.args.get("answer", "")
+            ctx.verification_issues = list(
                 dict.fromkeys(
                     issue
                     for review in latest_conclusion.reviews
                     for issue in review.issues
                 )
             )
-        max_steps = self.config.max_react_steps
-        search_mathlib_count = max(
+        ctx.search_mathlib_count = max(
             sum(turn.action.name == "search_mathlib" for turn in trace.turns),
             trace.budget_consumption.get("search_mathlib_calls", 0),
         )
@@ -561,82 +635,40 @@ class ReActAgent:
             and turn.observation.error not in _NON_CONSUMING_TOOL_ERRORS
             for turn in trace.turns
         )
-        tool_calls = max(
+        ctx.tool_calls = max(
             inferred_tool_calls,
             trace.budget_consumption.get("tool_calls", 0),
         )
-        next_step_num = max(
+        ctx.next_step_num = max(
             trace.next_step_num,
             max((turn.step_num for turn in trace.turns), default=0) + 1,
         )
+
+    async def _run_react_loop(self, ctx: SolveContext) -> None:
+        """Act phase: the ReAct loop over generation/validation/execution."""
+        trace = ctx.trace
+        emit = ctx.emit
+        run_log = ctx.run_log
+        max_steps = self.config.max_react_steps
         step_numbers = (
-            () if conclusion_budget_exhausted else range(next_step_num, max_steps + 1)
+            ()
+            if ctx.conclusion_budget_exhausted
+            else range(ctx.next_step_num, max_steps + 1)
         )
         for step_num in step_numbers:
-            if (
-                max_llm_calls > 0
-                and self._llm_call_counter.calls >= max_llm_calls
-            ):
+            if llm_calls_exhausted(self._llm_call_counter.calls, ctx.max_llm_calls):
                 run_log.warning(
                     "LLM-call budget exhausted (%d/%d); ending solve as best_effort",
                     self._llm_call_counter.calls,
-                    max_llm_calls,
+                    ctx.max_llm_calls,
                 )
-                llm_budget_exhausted = True
-                terminated_without_synthesis = True
+                ctx.llm_budget_exhausted = True
+                ctx.terminated_without_synthesis = True
                 break
-            is_first_step = not trace.turns
-            await self._maybe_compact_context(trace, run_log)
-            # Retain attachments when the model is only revising a conclusion
-            # so that the original problem images remain visible.
-            only_conclusions_so_far = all(
-                turn.action.name == "conclude" for turn in trace.turns
-            )
-            try:
-                if self._native_tools_enabled():
-                    thought, action, action_confidence = await _await_phase(
-                        self._generate_action_native(
-                            trace,
-                            run_log,
-                            emit,
-                            attachments=attachments
-                            if (is_first_step or only_conclusions_so_far)
-                            else None,
-                            require_formal_verification=require_formal_verification,
-                        ),
-                        deadline=deadline,
-                        run_log=run_log,
-                        phase="model_generation",
-                        model_role="main",
-                    )
-                else:
-                    raw_response, action_confidence = await _await_phase(
-                        self._generate_action(
-                            trace,
-                            run_log,
-                            emit,
-                            attachments=attachments
-                            if (is_first_step or only_conclusions_so_far)
-                            else None,
-                            require_formal_verification=require_formal_verification,
-                        ),
-                        deadline=deadline,
-                        run_log=run_log,
-                        phase="model_generation",
-                        model_role="main",
-                    )
-                    action = await _await_phase(
-                        self._parse_action_safe(raw_response, run_log),
-                        deadline=deadline,
-                        run_log=run_log,
-                        phase="action_parsing",
-                        model_role="main",
-                    )
-                    thought = _extract_thought(raw_response)
-            except asyncio.TimeoutError:
-                wall_time_exhausted = True
-                terminated_without_synthesis = True
+            generated = await self._generate_step_action(ctx)
+            if generated is None:
                 break
+            thought, action, action_confidence = generated
 
             run_log.info("Step %s action: %s", step_num, action.name)
             if action.name == "conclude" and isinstance(action.args, dict):
@@ -645,128 +677,34 @@ class ReActAgent:
                 {"type": "step_start", "step_num": step_num, "action": action.name}
             )
 
-            validation_error = self._validate_action(action)
-            if validation_error is not None:
-                error_code, message = validation_error
-                turn = ReActTurn(
-                    thought=thought,
-                    action=action,
-                    observation=ToolObservation(
-                        success=False,
-                        output=message,
-                        error=error_code,
-                    ),
-                    step_num=step_num,
-                )
-                trace.turns.append(turn)
-                trace.next_step_num = step_num + 1
-                await self._emit_turn(turn, emit, trace)
-                if on_checkpoint:
-                    on_checkpoint(_trace_snapshot(trace, strategy="react"))
+            if await self._record_invalid_action(ctx, thought, action, step_num):
                 continue
 
-            if (
-                _consecutive_identical_actions(trace, action, self.tools)
-                >= self.config.max_identical_action_repeats
+            if await self._enforce_identical_action_limit(
+                ctx, thought, action, step_num
             ):
-                issue = "Stopped before executing a third consecutive identical action."
-                turn = ReActTurn(
-                    thought=thought,
-                    action=action,
-                    observation=ToolObservation(
-                        success=False,
-                        output=issue,
-                        error="identical_action_limit",
-                    ),
-                    step_num=step_num,
-                )
-                trace.turns.append(turn)
-                trace.next_step_num = step_num + 1
-                verification_issues = list(dict.fromkeys([*verification_issues, issue]))
-                terminated_without_synthesis = True
-                await self._emit_turn(turn, emit, trace)
-                if on_checkpoint:
-                    on_checkpoint(_trace_snapshot(trace, strategy="react"))
                 break
 
             if action.name == "conclude":
-                decision = await conclude_gate.handle(
-                    trace=trace,
-                    action=action,
-                    thought=thought,
-                    step_num=step_num,
-                    candidate_answer=candidate_answer,
-                    action_confidence=action_confidence,
-                    conclusion_revisions=conclusion_revisions,
-                    verification_issues=verification_issues,
-                    accepted_formal_evidence_id=accepted_formal_evidence_id,
+                should_stop = await self._handle_conclude(
+                    ctx, thought, action, step_num, action_confidence
                 )
-                candidate_answer = decision.candidate_answer
-                verification_issues = decision.verification_issues
-                conclusion_revisions = decision.conclusion_revisions
-                accepted_formal_evidence_id = decision.accepted_formal_evidence_id
-                if decision.revise:
-                    continue
-                final_answer = decision.final_answer
-                if decision.outcome is not None:
-                    outcome = decision.outcome
-                    verification_status = decision.verification_status
-                wall_time_exhausted = decision.wall_time_exhausted
-                terminated_without_synthesis = decision.terminated_without_synthesis
-                break
+                if should_stop:
+                    break
+                continue
 
             registered_tool_name = self._registered_tool_name(action.name)
-            if (
-                hitl_should_pause(self.config.hitl, "tool_approval")
-                and registered_tool_name is not None
-                and action.name in self.config.hitl.approval_tools
-                and action.name not in self.config.hitl.auto_approve_tools
-                and len(trace.human_decisions) < self.config.hitl.max_interrupts_per_run
+            self._maybe_pause_for_tool_approval(
+                ctx, action, step_num, registered_tool_name
+            )
+            if await self._enforce_tool_call_budget(
+                ctx, thought, action, step_num, registered_tool_name
             ):
-                interaction = create_interaction(
-                    kind="tool_approval",
-                    stage="tool_approval",
-                    question=f"Agent 请求执行 {action.name}。是否允许？",
-                    details={
-                        "step_num": step_num,
-                        "action": {"name": action.name, "args": dict(action.args)},
-                    },
-                )
-                trace.pending_interaction = interaction
-                if on_checkpoint:
-                    on_checkpoint(_trace_snapshot(trace, strategy="react"))
-                pause_for_human(trace, interaction)
-            if (
-                registered_tool_name is not None
-                and tool_calls >= self.config.max_tool_calls
-            ):
-                issue = f"Tool-call budget exhausted after {tool_calls} consumed calls."
-                turn = ReActTurn(
-                    thought=thought,
-                    action=action,
-                    observation=ToolObservation(
-                        success=False,
-                        output=issue,
-                        error="tool_call_budget_exhausted",
-                    ),
-                    step_num=step_num,
-                )
-                trace.turns.append(turn)
-                trace.next_step_num = step_num + 1
-                trace.budget_consumption["tool_calls"] = tool_calls
-                verification_issues = list(dict.fromkeys([*verification_issues, issue]))
-                # Do NOT set terminated_without_synthesis here: unlike a wall-time
-                # timeout, the LLM is still available when the tool budget runs
-                # out, so fall through to final-answer synthesis and return the
-                # gathered partial results instead of a bare status blurb.
-                await self._emit_turn(turn, emit, trace)
-                if on_checkpoint:
-                    on_checkpoint(_trace_snapshot(trace, strategy="react"))
                 break
 
             if registered_tool_name is not None:
-                tool_calls += 1
-                trace.budget_consumption["tool_calls"] = tool_calls
+                ctx.tool_calls += 1
+                trace.budget_consumption["tool_calls"] = ctx.tool_calls
 
             await emit(
                 {
@@ -780,134 +718,13 @@ class ReActAgent:
                 }
             )
 
-            display_tool = action.name
-            if action.name == "search_mathlib":
-                search_mathlib_count += 1
-                trace.budget_consumption["search_mathlib_calls"] = search_mathlib_count
-                search_mathlib_max_calls = max(
-                    0, int(getattr(self.config, "search_mathlib_max_calls", 3))
-                )
-                if search_mathlib_count > search_mathlib_max_calls:
-                    observation = ToolObservation(
-                        success=True,
-                        output=(
-                            f"You have already used search_mathlib "
-                            f"{search_mathlib_max_calls} times. "
-                            "The exact result is probably not in mathlib4. "
-                            "Stop searching and proceed with formalize/lean_check."
-                        ),
-                        error="search_mathlib_limit_reached",
-                    )
-                else:
-                    try:
-                        observation = await _await_phase(
-                            self._execute_with_heartbeat(action, trace, emit, step_num),
-                            deadline=deadline,
-                            run_log=run_log,
-                            phase="tool_execution",
-                            model_role="main",
-                        )
-                    except asyncio.TimeoutError:
-                        observation = ToolObservation(
-                            success=False,
-                            output="Tool execution exceeded the solve wall-time budget.",
-                            error="wall_time_budget_exhausted",
-                        )
-                        wall_time_exhausted = True
-                        terminated_without_synthesis = True
-            else:
-                try:
-                    observation = await _await_phase(
-                        self._execute_with_heartbeat(action, trace, emit, step_num),
-                        deadline=deadline,
-                        run_log=run_log,
-                        phase="tool_execution",
-                        model_role="main",
-                    )
-                except asyncio.TimeoutError:
-                    observation = ToolObservation(
-                        success=False,
-                        output="Tool execution exceeded the solve wall-time budget.",
-                        error="wall_time_budget_exhausted",
-                    )
-                    wall_time_exhausted = True
-                    terminated_without_synthesis = True
-
-            if (
-                observation.error == "blocked_by_hook"
-                and registered_tool_name is not None
-            ):
-                # A pre-tool hook vetoed the call before it ran: refund the
-                # tool budget so the block has the same non-consuming
-                # semantics as an invalid action.
-                tool_calls -= 1
-                trace.budget_consumption["tool_calls"] = tool_calls
-
-            observation = attach_formal_evidence(
-                action,
-                observation,
-                target_claim=trace.current_goal or trace.problem,
+            observation = await self._execute_step_tool(ctx, action, step_num)
+            observation = await self._record_tool_result(
+                ctx, action, observation, step_num, registered_tool_name
             )
-            if action.name in FORMAL_ACTIONS:
-                trace.proof_graph.record_formal_attempt(
-                    success=observation.success,
-                    evidence_id=evidence_id_from_observation(observation),
-                    issue=observation.error
-                    or ("" if observation.success else observation.output[:500]),
-                )
+            await self._record_step_turn(ctx, thought, action, observation, step_num)
 
-            await emit(
-                {
-                    "type": "tool_done",
-                    "step_num": step_num,
-                    "tool": display_tool,
-                    "success": observation.success,
-                    "output": observation.output[:2000],
-                    "error": observation.error,
-                }
-            )
-
-            turn = ReActTurn(
-                thought=thought,
-                action=action,
-                observation=observation,
-                step_num=step_num,
-            )
-            if action.name == "set_goal":
-                trace.current_goal = action.args.get("goal", trace.current_goal)
-                raw_dependencies = action.args.get("depends_on") or []
-                dependencies = (
-                    [str(item) for item in raw_dependencies]
-                    if isinstance(raw_dependencies, list)
-                    else []
-                )
-                try:
-                    trace.proof_graph.upsert_goal(
-                        trace.current_goal,
-                        goal_id=str(action.args.get("goal_id") or ""),
-                        depends_on=dependencies,
-                        activate=True,
-                    )
-                except (KeyError, ValueError) as exc:
-                    observation.success = False
-                    observation.error = "invalid_proof_goal"
-                    observation.output = f"Could not update proof goal graph: {exc}"
-            trace.turns.append(turn)
-            trace.next_step_num = step_num + 1
-            await self._emit_turn(turn, emit, trace)
-
-            mid_verify_issue = await self._maybe_mid_verify(
-                trace, turn, emit, deadline, run_log
-            )
-            if mid_verify_issue:
-                verification_issues = list(
-                    dict.fromkeys([*verification_issues, mid_verify_issue])
-                )
-
-            if on_checkpoint:
-                on_checkpoint(_trace_snapshot(trace, strategy="react"))
-
-            if wall_time_exhausted:
+            if ctx.wall_time_exhausted:
                 break
 
             if observation.lean_code:
@@ -919,42 +736,414 @@ class ReActAgent:
                         "errors": [],
                     }
                 )
-        if not final_answer:
-            if candidate_answer:
-                final_answer = candidate_answer
-            elif not terminated_without_synthesis:
+
+    async def _generate_step_action(
+        self, ctx: SolveContext
+    ) -> tuple[str, Action, float | None] | None:
+        """Generate the next (thought, action, confidence); None on wall timeout."""
+        trace = ctx.trace
+        run_log = ctx.run_log
+        emit = ctx.emit
+        is_first_step = not trace.turns
+        await self._maybe_compact_context(trace, run_log)
+        # Retain attachments when the model is only revising a conclusion
+        # so that the original problem images remain visible.
+        only_conclusions_so_far = all(
+            turn.action.name == "conclude" for turn in trace.turns
+        )
+        step_attachments = (
+            ctx.attachments if (is_first_step or only_conclusions_so_far) else None
+        )
+        try:
+            if self._native_tools_enabled():
+                thought, action, action_confidence = await _await_phase(
+                    self._generate_action_native(
+                        trace,
+                        run_log,
+                        emit,
+                        attachments=step_attachments,
+                        require_formal_verification=ctx.require_formal_verification,
+                    ),
+                    deadline=ctx.deadline,
+                    run_log=run_log,
+                    phase="model_generation",
+                    model_role="main",
+                )
+            else:
+                raw_response, action_confidence = await _await_phase(
+                    self._generate_action(
+                        trace,
+                        run_log,
+                        emit,
+                        attachments=step_attachments,
+                        require_formal_verification=ctx.require_formal_verification,
+                    ),
+                    deadline=ctx.deadline,
+                    run_log=run_log,
+                    phase="model_generation",
+                    model_role="main",
+                )
+                action = await _await_phase(
+                    self._parse_action_safe(raw_response, run_log),
+                    deadline=ctx.deadline,
+                    run_log=run_log,
+                    phase="action_parsing",
+                    model_role="main",
+                )
+                thought = _extract_thought(raw_response)
+        except asyncio.TimeoutError:
+            ctx.wall_time_exhausted = True
+            ctx.terminated_without_synthesis = True
+            return None
+        return thought, action, action_confidence
+
+    async def _record_invalid_action(
+        self, ctx: SolveContext, thought: str, action: Action, step_num: int
+    ) -> bool:
+        """Append a failed-validation turn; True when the action was invalid."""
+        validation_error = self._validate_action(action)
+        if validation_error is None:
+            return False
+        trace = ctx.trace
+        error_code, message = validation_error
+        turn = ReActTurn(
+            thought=thought,
+            action=action,
+            observation=ToolObservation(
+                success=False,
+                output=message,
+                error=error_code,
+            ),
+            step_num=step_num,
+        )
+        trace.turns.append(turn)
+        trace.next_step_num = step_num + 1
+        await self._emit_turn(turn, ctx.emit, trace)
+        ctx.checkpoint()
+        return True
+
+    async def _enforce_identical_action_limit(
+        self, ctx: SolveContext, thought: str, action: Action, step_num: int
+    ) -> bool:
+        """Stop the loop before too many consecutive identical actions."""
+        trace = ctx.trace
+        if (
+            _consecutive_identical_actions(trace, action, self.tools)
+            < self.config.max_identical_action_repeats
+        ):
+            return False
+        issue = "Stopped before executing a third consecutive identical action."
+        turn = ReActTurn(
+            thought=thought,
+            action=action,
+            observation=ToolObservation(
+                success=False,
+                output=issue,
+                error="identical_action_limit",
+            ),
+            step_num=step_num,
+        )
+        trace.turns.append(turn)
+        trace.next_step_num = step_num + 1
+        ctx.verification_issues = list(
+            dict.fromkeys([*ctx.verification_issues, issue])
+        )
+        ctx.terminated_without_synthesis = True
+        await self._emit_turn(turn, ctx.emit, trace)
+        ctx.checkpoint()
+        return True
+
+    async def _handle_conclude(
+        self,
+        ctx: SolveContext,
+        thought: str,
+        action: Action,
+        step_num: int,
+        action_confidence: float | None,
+    ) -> bool:
+        """Route a conclude action through the gate; True when the loop ends."""
+        decision = await ctx.conclude_gate.handle(
+            trace=ctx.trace,
+            action=action,
+            thought=thought,
+            step_num=step_num,
+            candidate_answer=ctx.candidate_answer,
+            action_confidence=action_confidence,
+            conclusion_revisions=ctx.conclusion_revisions,
+            verification_issues=ctx.verification_issues,
+            accepted_formal_evidence_id=ctx.accepted_formal_evidence_id,
+        )
+        ctx.candidate_answer = decision.candidate_answer
+        ctx.verification_issues = decision.verification_issues
+        ctx.conclusion_revisions = decision.conclusion_revisions
+        ctx.accepted_formal_evidence_id = decision.accepted_formal_evidence_id
+        if decision.revise:
+            return False
+        ctx.final_answer = decision.final_answer
+        if decision.outcome is not None:
+            ctx.outcome = decision.outcome
+            ctx.verification_status = decision.verification_status
+        ctx.wall_time_exhausted = decision.wall_time_exhausted
+        ctx.terminated_without_synthesis = decision.terminated_without_synthesis
+        return True
+
+    def _maybe_pause_for_tool_approval(
+        self,
+        ctx: SolveContext,
+        action: Action,
+        step_num: int,
+        registered_tool_name: str | None,
+    ) -> None:
+        """Escalate a configured tool call to the human (raises to pause)."""
+        trace = ctx.trace
+        if (
+            hitl_should_pause(self.config.hitl, "tool_approval")
+            and registered_tool_name is not None
+            and action.name in self.config.hitl.approval_tools
+            and action.name not in self.config.hitl.auto_approve_tools
+            and len(trace.human_decisions) < self.config.hitl.max_interrupts_per_run
+        ):
+            interaction = create_interaction(
+                kind="tool_approval",
+                stage="tool_approval",
+                question=f"Agent 请求执行 {action.name}。是否允许？",
+                details={
+                    "step_num": step_num,
+                    "action": {"name": action.name, "args": dict(action.args)},
+                },
+            )
+            trace.pending_interaction = interaction
+            ctx.checkpoint()
+            pause_for_human(trace, interaction)
+
+    async def _enforce_tool_call_budget(
+        self,
+        ctx: SolveContext,
+        thought: str,
+        action: Action,
+        step_num: int,
+        registered_tool_name: str | None,
+    ) -> bool:
+        """End the loop when the tool-call budget is spent (None = unlimited)."""
+        if registered_tool_name is None or not tool_calls_exhausted(
+            ctx.tool_calls, self.config.max_tool_calls
+        ):
+            return False
+        trace = ctx.trace
+        issue = f"Tool-call budget exhausted after {ctx.tool_calls} consumed calls."
+        turn = ReActTurn(
+            thought=thought,
+            action=action,
+            observation=ToolObservation(
+                success=False,
+                output=issue,
+                error="tool_call_budget_exhausted",
+            ),
+            step_num=step_num,
+        )
+        trace.turns.append(turn)
+        trace.next_step_num = step_num + 1
+        trace.budget_consumption["tool_calls"] = ctx.tool_calls
+        ctx.verification_issues = list(
+            dict.fromkeys([*ctx.verification_issues, issue])
+        )
+        # Do NOT set terminated_without_synthesis here: unlike a wall-time
+        # timeout, the LLM is still available when the tool budget runs
+        # out, so fall through to final-answer synthesis and return the
+        # gathered partial results instead of a bare status blurb.
+        await self._emit_turn(turn, ctx.emit, trace)
+        ctx.checkpoint()
+        return True
+
+    async def _execute_step_tool(
+        self, ctx: SolveContext, action: Action, step_num: int
+    ) -> ToolObservation:
+        """Run the action's tool with heartbeat, enforcing per-tool budgets."""
+        trace = ctx.trace
+        if action.name == "search_mathlib":
+            ctx.search_mathlib_count += 1
+            trace.budget_consumption["search_mathlib_calls"] = (
+                ctx.search_mathlib_count
+            )
+            search_mathlib_max_calls = max(
+                0, int(getattr(self.config, "search_mathlib_max_calls", 3))
+            )
+            if ctx.search_mathlib_count > search_mathlib_max_calls:
+                return ToolObservation(
+                    success=True,
+                    output=(
+                        f"You have already used search_mathlib "
+                        f"{search_mathlib_max_calls} times. "
+                        "The exact result is probably not in mathlib4. "
+                        "Stop searching and proceed with formalize/lean_check."
+                    ),
+                    error="search_mathlib_limit_reached",
+                )
+        try:
+            return await _await_phase(
+                self._execute_with_heartbeat(action, trace, ctx.emit, step_num),
+                deadline=ctx.deadline,
+                run_log=ctx.run_log,
+                phase="tool_execution",
+                model_role="main",
+            )
+        except asyncio.TimeoutError:
+            ctx.wall_time_exhausted = True
+            ctx.terminated_without_synthesis = True
+            return ToolObservation(
+                success=False,
+                output="Tool execution exceeded the solve wall-time budget.",
+                error="wall_time_budget_exhausted",
+            )
+
+    async def _record_tool_result(
+        self,
+        ctx: SolveContext,
+        action: Action,
+        observation: ToolObservation,
+        step_num: int,
+        registered_tool_name: str | None,
+    ) -> ToolObservation:
+        """Attach formal evidence, update budgets/graph, emit tool_done."""
+        trace = ctx.trace
+        if (
+            observation.error == "blocked_by_hook"
+            and registered_tool_name is not None
+        ):
+            # A pre-tool hook vetoed the call before it ran: refund the
+            # tool budget so the block has the same non-consuming
+            # semantics as an invalid action.
+            ctx.tool_calls -= 1
+            trace.budget_consumption["tool_calls"] = ctx.tool_calls
+
+        observation = attach_formal_evidence(
+            action,
+            observation,
+            target_claim=trace.current_goal or trace.problem,
+        )
+        if action.name in FORMAL_ACTIONS:
+            trace.proof_graph.record_formal_attempt(
+                success=observation.success,
+                evidence_id=evidence_id_from_observation(observation),
+                issue=observation.error
+                or ("" if observation.success else observation.output[:500]),
+            )
+
+        await ctx.emit(
+            {
+                "type": "tool_done",
+                "step_num": step_num,
+                "tool": action.name,
+                "success": observation.success,
+                "output": observation.output[:2000],
+                "error": observation.error,
+            }
+        )
+        return observation
+
+    async def _record_step_turn(
+        self,
+        ctx: SolveContext,
+        thought: str,
+        action: Action,
+        observation: ToolObservation,
+        step_num: int,
+    ) -> None:
+        """Append the completed turn, update the proof graph, mid-verify."""
+        trace = ctx.trace
+        turn = ReActTurn(
+            thought=thought,
+            action=action,
+            observation=observation,
+            step_num=step_num,
+        )
+        if action.name == "set_goal":
+            trace.current_goal = action.args.get("goal", trace.current_goal)
+            raw_dependencies = action.args.get("depends_on") or []
+            dependencies = (
+                [str(item) for item in raw_dependencies]
+                if isinstance(raw_dependencies, list)
+                else []
+            )
+            try:
+                trace.proof_graph.upsert_goal(
+                    trace.current_goal,
+                    goal_id=str(action.args.get("goal_id") or ""),
+                    depends_on=dependencies,
+                    activate=True,
+                )
+            except (KeyError, ValueError) as exc:
+                observation.success = False
+                observation.error = "invalid_proof_goal"
+                observation.output = f"Could not update proof goal graph: {exc}"
+        trace.turns.append(turn)
+        trace.next_step_num = step_num + 1
+        await self._emit_turn(turn, ctx.emit, trace)
+
+        mid_verify_issue = await self._maybe_mid_verify(
+            trace, turn, ctx.emit, ctx.deadline, ctx.run_log
+        )
+        if mid_verify_issue:
+            ctx.verification_issues = list(
+                dict.fromkeys([*ctx.verification_issues, mid_verify_issue])
+            )
+
+        ctx.checkpoint()
+
+    async def _finalize_solve(self, ctx: SolveContext) -> ReActSolution:
+        """Finalize phase: synthesize an answer if needed, build the solution."""
+        trace = ctx.trace
+        run_log = ctx.run_log
+        emit = ctx.emit
+        if not ctx.final_answer:
+            if ctx.candidate_answer:
+                ctx.final_answer = ctx.candidate_answer
+            elif not ctx.terminated_without_synthesis:
                 # Step budget exhausted without an explicit conclusion. Synthesize a
                 # real final answer from the trace instead of returning a raw thought.
                 try:
-                    final_answer = await _await_phase(
+                    ctx.final_answer = await _await_phase(
                         self._synthesize_final_answer(trace, run_log, emit),
-                        deadline=deadline,
+                        deadline=ctx.deadline,
                         run_log=run_log,
                         phase="final_answer_synthesis",
                         model_role="main",
                     )
                 except asyncio.TimeoutError:
-                    wall_time_exhausted = True
-                    terminated_without_synthesis = True
-        if wall_time_exhausted:
-            issue = f"Solve exceeded the {max_wall_seconds:g}-second wall-time budget."
-            verification_issues = list(dict.fromkeys([*verification_issues, issue]))
-            outcome = outcome_best_effort(limitations=tuple(verification_issues))
-            verification_status = legacy_label(outcome)
-        if llm_budget_exhausted:
+                    ctx.wall_time_exhausted = True
+                    ctx.terminated_without_synthesis = True
+        if ctx.wall_time_exhausted:
+            issue = (
+                f"Solve exceeded the {ctx.max_wall_seconds:g}-second "
+                "wall-time budget."
+            )
+            ctx.verification_issues = list(
+                dict.fromkeys([*ctx.verification_issues, issue])
+            )
+            ctx.outcome = outcome_best_effort(
+                limitations=tuple(ctx.verification_issues)
+            )
+            ctx.verification_status = legacy_label(ctx.outcome)
+        if ctx.llm_budget_exhausted:
             issue = (
                 "Solve exceeded the per-problem LLM-call budget "
-                f"({self._llm_call_counter.calls}/{max_llm_calls} calls)."
+                f"({self._llm_call_counter.calls}/{ctx.max_llm_calls} calls)."
             )
-            verification_issues = list(dict.fromkeys([*verification_issues, issue]))
-            outcome = outcome_best_effort(limitations=tuple(verification_issues))
-            verification_status = legacy_label(outcome)
-        if not final_answer or not final_answer.strip():
-            final_answer = best_effort_answer(trace)
-        if not final_answer or not final_answer.strip():
-            final_answer = "No solution could be produced within the allotted steps."
+            ctx.verification_issues = list(
+                dict.fromkeys([*ctx.verification_issues, issue])
+            )
+            ctx.outcome = outcome_best_effort(
+                limitations=tuple(ctx.verification_issues)
+            )
+            ctx.verification_status = legacy_label(ctx.outcome)
+        if not ctx.final_answer or not ctx.final_answer.strip():
+            ctx.final_answer = best_effort_answer(trace)
+        if not ctx.final_answer or not ctx.final_answer.strip():
+            ctx.final_answer = (
+                "No solution could be produced within the allotted steps."
+            )
 
-        if accepted_formal_evidence_id:
+        if ctx.accepted_formal_evidence_id:
             accepted_formal_turn = next(
                 (
                     turn
@@ -962,7 +1151,7 @@ class ReActAgent:
                     if turn.action.name in FORMAL_ACTIONS
                     and turn.observation.success
                     and evidence_id_from_observation(turn.observation)
-                    == accepted_formal_evidence_id
+                    == ctx.accepted_formal_evidence_id
                 ),
                 None,
             )
@@ -970,16 +1159,20 @@ class ReActAgent:
                 accepted_formal_turn is not None
                 and accepted_formal_turn.observation.lean_code
             ):
-                from math_agent.agent.knowledge.promotion import promote_verified_lean
+                from math_agent.agent.knowledge.promotion import (
+                    promote_verified_lean,
+                )
 
                 promotion_msg = promote_verified_lean(
                     self.tools.knowledge_store,
                     self.project_context.project_id or "default",
                     accepted_formal_turn.observation.lean_code,
-                    evidence_id=accepted_formal_evidence_id,
-                    accepted_evidence_id=accepted_formal_evidence_id,
+                    evidence_id=ctx.accepted_formal_evidence_id,
+                    accepted_evidence_id=ctx.accepted_formal_evidence_id,
                     status=(
-                        "approved" if verification_status == "verified" else "candidate"
+                        "approved"
+                        if ctx.verification_status == "verified"
+                        else "candidate"
                     ),
                 )
                 run_log.info("Promotion result: %s", promotion_msg)
@@ -990,9 +1183,9 @@ class ReActAgent:
 
         trace.tool_stats = self.tools.tool_stats
         solution = ReActSolution(
-            problem=problem,
+            problem=ctx.problem,
             turns=trace.turns,
-            final_answer=final_answer,
+            final_answer=ctx.final_answer,
             llm_call_count=self._llm_call_counter.calls,
             lean_proofs=(
                 [
@@ -1002,15 +1195,15 @@ class ReActAgent:
                     and turn.observation.success
                     and turn.observation.lean_code
                     and evidence_id_from_observation(turn.observation)
-                    == accepted_formal_evidence_id
+                    == ctx.accepted_formal_evidence_id
                 ]
-                if verification_status == "verified"
+                if ctx.verification_status == "verified"
                 else []
             ),
-            verification_status=verification_status,
-            verification_issues=verification_issues,
+            verification_status=ctx.verification_status,
+            verification_issues=ctx.verification_issues,
             trace=trace,
-            verification_outcome=outcome,
+            verification_outcome=ctx.outcome,
         )
         if self.config.memory_consolidation_enabled and self.consolidator is not None:
             try:

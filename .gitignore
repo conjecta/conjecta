@@ -19,7 +19,9 @@ data/conjecta_runs/
 data/benchmarks/_src/
 data/benchmarks/**/*.jsonl
 data/benchmarks/manifest.json
-data/eval-results/
+data/eval-results/*
+# ...but keep the benchmark provenance manifest versioned.
+!data/eval-results/manifest.toml
 data/eval/minif2f_*.jsonl
 data/eval/minif2f_build_report.json
 data/materials/
@@ -42,8 +44,11 @@ test.py
 # Superpowers brainstorming companion
 .superpowers/
 
+# Vite build output for workbench
+math_agent/web/static/assets/
 .venv-dev/
 
 # Local server tuning; must not be tracked (deploy stash rollback)
 config.toml
 config.retry.toml
+.coverage

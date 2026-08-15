@@ -68,8 +68,8 @@ async def main() -> int:
     out = Path(args.output)
     done_ids = set()
     if out.exists():
-        for line in out.open():
-            r = json.loads(line)
+        for l in out.open():
+            r = json.loads(l)
             if r.get("case_id"):
                 done_ids.add(r["case_id"])
 
@@ -91,7 +91,7 @@ async def main() -> int:
             f.flush()
             print(f"[{i+1}/{len(cases)}] {case.id}: {row['correct']}", flush=True)
 
-    rows = [json.loads(line) for line in out.open()]
+    rows = [json.loads(l) for l in out.open()]
     correct = sum(1 for r in rows if r.get("correct"))
     print(f"RAW ONESHOT: {correct}/{len(rows)} correct ({correct/len(rows)*100:.1f}%)")
     return 0

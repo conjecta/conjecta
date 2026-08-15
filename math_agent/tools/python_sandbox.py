@@ -1,12 +1,26 @@
-"""Restricted one-shot Python subprocess sandbox for the compute tool."""
+"""Restricted one-shot Python subprocess sandbox for the compute tool.
+
+Security model: the AST validation below is a first-layer UX / early-error
+check only — it is NOT the security boundary (allowed native extensions such
+as numpy/sympy make static checks bypassable in principle).  The boundary is
+bubblewrap isolation via :mod:`math_agent.tools.isolated_runner`, applied
+when ``CONJECTA_SANDBOX_ISOLATION`` is ``bwrap``, or ``auto`` with bwrap
+installed.  When bwrap is unavailable the child runs with rlimits + AST
+checks only and a WARNING is logged once; treat that fallback as
+defense-in-depth, not isolation.  See SECURITY.md.
+"""
 from __future__ import annotations
 
 import ast
 import asyncio
+import contextlib
 import os
 import sys
 import textwrap
 from dataclasses import dataclass
+from pathlib import Path
+
+from math_agent.tools import isolated_runner
 
 _MAX_CODE_CHARS = 16_384
 _MAX_OUTPUT_CHARS = 32_768
@@ -34,7 +48,9 @@ _ALLOWED_MODULES = frozenset(
         # Network access is allowed only through the guarded urlopen installed
         # in the child preamble: public http(s) URLs pass; private, loopback,
         # link-local, and reserved ranges (incl. cloud metadata endpoints) are
-        # rejected before any connection is made.
+        # rejected before any connection is made.  Under bwrap isolation the
+        # child has no network namespace at all, so this guard only matters
+        # for the non-isolated fallback.
         "urllib",
     }
 )
@@ -249,9 +265,13 @@ def _child_runner_source(user_source: str) -> str:
 
         # Guarded network egress: patch urllib.request.urlopen so user code can
         # fetch public http(s) URLs while private/loopback/reserved targets are
-        # rejected pre-connection. Best-effort, mirroring the blocked ranges of
-        # the server's fetch_url path; the child cannot import the project, so
-        # the guard is self-contained here.
+        # rejected pre-connection.  This only matters for the non-isolated
+        # fallback: under bwrap the child has no network at all.
+        #
+        # The blocked-IP logic mirrors math_agent.net_safety (normalize_ip +
+        # is_blocked_ip), which is the source of truth — the child prunes
+        # sys.path and cannot import the project, so the same checks are
+        # inlined here.  Keep the two in sync.
         import ipaddress as _ipaddress
         import socket as _socket
         import urllib.request as _urllib_request
@@ -267,6 +287,27 @@ def _child_runner_source(user_source: str) -> str:
                 "240.0.0.0/4", "224.0.0.0/4",
             )
         ]
+
+        def _normalize_ip(value):
+            # Map IPv4-mapped IPv6 (e.g. ::ffff:127.0.0.1) back to IPv4 so the
+            # IPv4 blocked ranges apply — same as net_safety.normalize_ip.
+            ip = _ipaddress.ip_address(value)
+            if isinstance(ip, _ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+                return ip.ipv4_mapped
+            return ip
+
+        def _is_blocked_ip(value):
+            # Same semantics as net_safety.is_blocked_ip.
+            try:
+                ip = _normalize_ip(value)
+            except ValueError:
+                return True
+            if ip.is_unspecified or ip.is_multicast:
+                return True
+            return any(
+                ip in net for net in _BLOCKED_NETWORKS
+                if ip.version == net.version
+            )
 
         def _url_blocked(url):
             target = url if isinstance(url, str) else url.full_url
@@ -288,11 +329,7 @@ def _child_runner_source(user_source: str) -> str:
                     raise ValueError("Could not resolve URL host: " + host)
                 addresses = [info[4][0] for info in infos]
             for address in addresses:
-                try:
-                    ip = _ipaddress.ip_address(address)
-                except ValueError:
-                    raise ValueError("Unresolvable address in URL.")
-                if any(ip in net for net in _BLOCKED_NETWORKS):
+                if _is_blocked_ip(address):
                     raise ValueError(
                         "URL resolves to a private or reserved network address."
                     )
@@ -351,7 +388,13 @@ def _child_runner_source(user_source: str) -> str:
 
 
 async def run_python(code: str, *, timeout: float = _DEFAULT_TIMEOUT) -> SandboxResult:
-    """Run Python code in a short-lived restricted subprocess."""
+    """Run Python code in a short-lived restricted subprocess.
+
+    The child is wrapped in bwrap (no network, nothing writable) when
+    isolation is active; otherwise it runs with rlimits + AST checks only
+    and a warning is logged once.  rlimits and the killpg timeout act as a
+    second layer in all modes.
+    """
     err = _validate_code(code)
     if err is not None:
         return SandboxResult(success=False, output=err)
@@ -359,21 +402,32 @@ async def run_python(code: str, *, timeout: float = _DEFAULT_TIMEOUT) -> Sandbox
     prepared = _prepare_source(code)
     runner = _child_runner_source(prepared)
 
+    argv = [sys.executable, "-c", runner]
+    env: dict[str, str] | None = {
+        "PATH": os.environ.get("PATH", ""),
+        "PYTHONPATH": "",
+        "HOME": os.environ.get("HOME", "/tmp"),
+        "LANG": os.environ.get("LANG", "C.UTF-8"),
+    }
+    if isolated_runner.isolation_active():
+        # bwrap controls the child env via --clearenv/--setenv.
+        argv = isolated_runner.build_bwrap_argv(
+            argv=argv,
+            writable_dirs=[],
+            workdir=Path("/tmp"),
+        )
+        env = None
+    else:
+        isolated_runner.warn_no_isolation_once("python_sandbox")
+
     try:
         proc = await asyncio.create_subprocess_exec(
-            sys.executable,
-            "-c",
-            runner,
+            *argv,
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             start_new_session=True,
-            env={
-                "PATH": os.environ.get("PATH", ""),
-                "PYTHONPATH": "",
-                "HOME": os.environ.get("HOME", "/tmp"),
-                "LANG": os.environ.get("LANG", "C.UTF-8"),
-            },
+            env=env,
         )
     except OSError as exc:
         return SandboxResult(success=False, output=f"Failed to start sandbox: {exc}")
@@ -415,11 +469,7 @@ async def _kill_process_group(proc: asyncio.subprocess.Process) -> None:
     try:
         os.killpg(proc.pid, 9)
     except (ProcessLookupError, PermissionError, OSError):
-        try:
+        with contextlib.suppress(ProcessLookupError):
             proc.kill()
-        except ProcessLookupError:
-            pass
-    try:
+    with contextlib.suppress(asyncio.TimeoutError, ProcessLookupError):
         await asyncio.wait_for(proc.wait(), timeout=2.0)
-    except (asyncio.TimeoutError, ProcessLookupError):
-        pass

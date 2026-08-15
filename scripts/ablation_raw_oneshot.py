@@ -68,7 +68,7 @@ async def main() -> int:
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
 
-    cases = [json.loads(line) for line in open(args.dataset) if line.strip()]
+    cases = [json.loads(l) for l in open(args.dataset) if l.strip()]
     config = load_config()
     llm = create_backend(config.llm)
     runner = LeanRunner(config.lean)
@@ -76,8 +76,8 @@ async def main() -> int:
     out = Path(args.output)
     done_ids = set()
     if out.exists():
-        for line in out.open():
-            r = json.loads(line)
+        for l in out.open():
+            r = json.loads(l)
             if r.get("case_id"):
                 done_ids.add(r["case_id"])
 
@@ -102,7 +102,7 @@ async def main() -> int:
                 flush=True,
             )
 
-    rows = [json.loads(line) for line in out.open()]
+    rows = [json.loads(l) for l in out.open()]
     verified = sum(1 for r in rows if r.get("correct"))
     print(f"RAW ONESHOT: {verified}/{len(rows)} verified ({verified/len(rows)*100:.1f}%)")
     return 0

@@ -7,8 +7,8 @@ def test_default_model_string_matches_config():
     assert default_model_string(cfg) == f"{cfg.llm.provider}/{cfg.llm.model}"
 
 
-def test_default_model_string_is_gpt_5_6_sol():
+def test_default_model_string_is_shengsuanyun_deepseek_v4_pro():
     from math_agent.config import Config, LLMConfig
 
-    cfg = Config(llm=LLMConfig(provider="openai", model="gpt-5.6-sol"))
-    assert default_model_string(cfg) == "openai/gpt-5.6-sol"
+    cfg = Config(llm=LLMConfig(provider="shengsuanyun", model="deepseek/deepseek-v4-pro"))
+    assert default_model_string(cfg) == "shengsuanyun/deepseek/deepseek-v4-pro"

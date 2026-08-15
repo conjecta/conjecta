@@ -216,7 +216,7 @@ async def test_selection_stream_drains_split_marker_and_json_without_emitting_js
     monkeypatch.setattr(web_app, "create_backend_from_model_string", lambda *args, **kwargs: llm)
     payload = {
         "problem": "Original parity request",
-        "model": "openai/gpt-5.6-sol",
+        "model": "fake/model",
         "facts": [{"id": "f1", "statement": "Parity fact", "status": "approved"}],
         "intuitions": [],
         "tricks": [],
@@ -240,7 +240,7 @@ async def test_selection_stream_caps_accumulation_at_128000_and_fails_safely(mon
     monkeypatch.setattr(web_app, "create_backend_from_model_string", lambda *args, **kwargs: llm)
     payload = {
         "problem": "Bound the response",
-        "model": "openai/gpt-5.6-sol",
+        "model": "fake/model",
         "facts": [{"id": "f1", "statement": "A fact", "status": "approved"}],
         "intuitions": [],
         "tricks": [],
@@ -260,7 +260,7 @@ async def test_selection_overflow_closes_upstream_before_terminal_error_is_obser
     monkeypatch.setattr(web_app, "create_backend_from_model_string", lambda *args, **kwargs: llm)
     payload = {
         "problem": "Bound the response",
-        "model": "openai/gpt-5.6-sol",
+        "model": "fake/model",
         "facts": [{"id": "f1", "statement": "A fact", "status": "approved"}],
         "intuitions": [],
         "tricks": [],
@@ -348,7 +348,7 @@ async def test_selection_treats_truthy_non_list_catalogs_as_empty(monkeypatch):
     )
     payload = {
         "problem": "Prove the claim",
-        "model": "openai/gpt-5.6-sol",
+        "model": "fake/model",
         "facts": 1,
         "intuitions": {"unexpected": "mapping"},
         "tricks": True,
@@ -379,7 +379,7 @@ async def test_satisfaction_treats_truthy_non_list_snapshot_fields_as_empty(monk
     payload = {
         "problem": "Continue",
         "conversation_history": [{"role": "user", "text": "Thanks"}],
-        "model": "openai/gpt-5.6-sol",
+        "model": "fake/model",
         "facts": 1,
         "intuitions": {"unexpected": "mapping"},
         "tricks": True,

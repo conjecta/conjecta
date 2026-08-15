@@ -18,6 +18,8 @@ require_command() {
   command -v "$command_name" >/dev/null 2>&1 || die "$help_text"
 }
 
+# Live deployment path on the production host; override for other checkouts
+# via the CONJECTA_REPO_DIR environment variable.
 REPO_DIR="${CONJECTA_REPO_DIR:-/opt/conjecta/Conjecta-v0}"
 SERVICE_NAME="${CONJECTA_SERVICE_NAME:-conjecta.service}"
 DEPLOY_REF="${1:-${CONJECTA_DEPLOY_REF:-main}}"
@@ -250,8 +252,9 @@ first_nginx_directive_value() {
 # Uvicorn starts with --ws-max-size 16777216, so the Nginx upload envelope must
 # not exceed 16 MiB or 16-25 MB uploads pass Nginx and die at the WebSocket layer.
 CONJECTA_NGINX_MAX_BODY_BYTES=16777216
-# research_max_wall_seconds defaults to 7200 (math_agent/config.py); Nginx must
-# not cut the proxied connection before the research wall clock expires.
+# Long solves can run for hours (deep_search_wall_seconds / formal escalation
+# budgets in math_agent/config.py); Nginx must not cut the proxied connection
+# before those budgets expire.
 CONJECTA_NGINX_MIN_PROXY_READ_TIMEOUT=7200
 
 assert_conjecta_nginx_config() {
@@ -286,12 +289,12 @@ assert_conjecta_nginx_config() {
     read_timeout_source="the inherited http-level configuration"
   fi
   [[ -n "$read_timeout_raw" ]] \
-    || die "Nginx sets no proxy_read_timeout for the Conjecta vhost; the 60s default cuts research runs (research_max_wall_seconds=${CONJECTA_NGINX_MIN_PROXY_READ_TIMEOUT})."
+    || die "Nginx sets no proxy_read_timeout for the Conjecta vhost; the 60s default cuts long solves (need >= ${CONJECTA_NGINX_MIN_PROXY_READ_TIMEOUT}s for deep-search / formal-escalation budgets)."
   local read_timeout_seconds=""
   read_timeout_seconds="$(nginx_time_to_seconds "$read_timeout_raw")" \
     || die "Unrecognized proxy_read_timeout value '${read_timeout_raw}' in ${read_timeout_source}."
   ((read_timeout_seconds >= CONJECTA_NGINX_MIN_PROXY_READ_TIMEOUT)) \
-    || die "proxy_read_timeout ${read_timeout_raw} in ${read_timeout_source} is below ${CONJECTA_NGINX_MIN_PROXY_READ_TIMEOUT}s (research_max_wall_seconds); long research runs would be cut by Nginx."
+    || die "proxy_read_timeout ${read_timeout_raw} in ${read_timeout_source} is below ${CONJECTA_NGINX_MIN_PROXY_READ_TIMEOUT}s; long solves (deep-search / formal-escalation budgets) would be cut by Nginx."
 
   grep -Eq 'proxy_set_header[[:space:]]+X-Real-IP[[:space:]]+\$remote_addr[[:space:]]*;' <<<"$server_blocks" \
     || die "The Conjecta Nginx vhost must overwrite X-Real-IP with \$remote_addr."

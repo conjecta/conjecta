@@ -2,8 +2,7 @@
 """A/B benchmark for memory consolidation effectiveness.
 
 Run with:
-    export OPENAI_API_KEY=...
-    export OPENAI_BASE_URL=https://your-provider.example/v1
+    export DEEPSEEK_API_KEY=...
     uv run python scripts/benchmark_memory.py
 """
 from __future__ import annotations

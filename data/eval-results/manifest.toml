@@ -1,0 +1,289 @@
+# Benchmark provenance manifest for docs/benchmark-results-2026-08.md.
+#
+# Each [[row]] maps one quantitative claim in the report to the raw result
+# file(s) under data/eval-results/ it was aggregated from, plus the command,
+# date, and model that produced them. `scripts/build_benchmark_report.py`
+# re-computes the aggregates from the sources and compares them against the
+# `expected_*` values copied from the report.
+#
+# status:
+#   "verified"   - mapping is confident; the report script recomputes and
+#                  compares the numbers (exit non-zero on divergence).
+#   "unverified" - the stored data alone cannot mechanically reproduce the
+#                  doc number; see `note`. Not a claim the number is wrong.
+#
+# judge: "numeric" counts records with correct=true; "lean" counts records
+# with verification_status="verified".
+#
+# Trailing {"type": "summary"} records in the result files are metadata
+# emitted by the eval runner and are excluded from recomputation.
+
+[[row]]
+id = "fast-tier1"
+doc = "Headline table: fast (tier1 basics) | n=54 | 100% | 8s / 3.3k tok"
+judge = "numeric"
+sources = ["fast-20260806-180936.jsonl"]
+command = "scripts/run_eval_chain.sh 20260806-180936  # uv run python scripts/evaluate_math_agent.py --config config.toml --dataset data/eval/fast.jsonl --trials 1 --output data/eval-results/fast-20260806-180936.jsonl"
+date = "2026-08-06"
+model = "gpt-5.6-sol"
+expected_n = 54
+expected_solved = 54
+expected_total = 54
+expected_median_seconds = 8.0
+expected_median_tokens = 3300.0
+status = "unverified"
+note = "Doc reports 100% after an offline re-judge with the fixed judge (see 'Judge false rejections' in the doc): the 4 failed cases were judge false rejections. The stored file recomputes to 50/54 = 92.6%, which matches the doc's stated pre-fix score, and the medians (8.4s / 3329 tok) match the doc. The 100% figure itself is not mechanically reproducible from this file without re-running the fixed judge over stored answers."
+
+[[row]]
+id = "tier2-aime-sample50"
+doc = "Headline table: AIME sample (tier2) | n=50 | 96.0% | 158s / 18.1k tok"
+judge = "numeric"
+sources = ["tier2-sample50-20260806-180936.jsonl"]
+command = "scripts/run_eval_chain.sh 20260806-180936  # uv run python scripts/evaluate_math_agent.py --config config.toml --dataset data/benchmarks/sampled/tier2_sample50.jsonl --trials 1 --output data/eval-results/tier2-sample50-20260806-180936.jsonl"
+date = "2026-08-06"
+model = "gpt-5.6-sol"
+expected_n = 50
+expected_solved = 48
+expected_total = 50
+expected_median_seconds = 158.0
+expected_median_tokens = 18100.0
+status = "verified"
+
+[[row]]
+id = "aime-2025-full"
+doc = "Headline table: AIME 2025 (full) | n=30 | 96.7% (29/30) | 252s / 21.6k tok"
+judge = "numeric"
+sources = ["aime_2025-full-20260811-102017.jsonl"]
+command = "uv run python scripts/evaluate_math_agent.py --dataset data/benchmarks/competition/aime_2025.jsonl --trials 1 --output data/eval-results/aime_2025-full-20260811-102017.jsonl  # see logs/eval/competition-full-20260811-102017.log"
+date = "2026-08-11"
+model = "gpt-5.6-sol"
+expected_n = 30
+expected_solved = 29
+expected_total = 30
+expected_median_seconds = 252.0
+expected_median_tokens = 21600.0
+status = "verified"
+note = "File is named in the doc. The doc's '100% with one retry' companion claim is covered by row aime-2025-14-retry."
+
+[[row]]
+id = "aime-2025-14-retry"
+doc = "Competition full runs: aime-2025-14 retry solved in 269s / 39.7k tok (answer 60)"
+judge = "numeric"
+sources = ["aime_2025_14-retry-20260811-133040.jsonl"]
+command = "uv run python scripts/evaluate_math_agent.py --config config.retry.toml --dataset <aime-2025-14 single-case dataset> --trials 1 --output data/eval-results/aime_2025_14-retry-20260811-133040.jsonl  # see logs/eval/aime14-retry-20260811-133040.log"
+date = "2026-08-11"
+model = "gpt-5.6-sol"
+expected_n = 1
+expected_solved = 1
+expected_total = 1
+expected_median_seconds = 269.0
+expected_median_tokens = 39700.0
+status = "verified"
+
+[[row]]
+id = "hmmt-feb-2025-full"
+doc = "Headline table: HMMT Feb 2025 (full) | n=20 | 100% (20/20) | 192s / 24.9k tok"
+judge = "numeric"
+sources = ["hmmt_feb_2025-full-20260811-102017.jsonl"]
+command = "uv run python scripts/evaluate_math_agent.py --dataset data/benchmarks/competition/hmmt_feb_2025.jsonl --trials 1 --output data/eval-results/hmmt_feb_2025-full-20260811-102017.jsonl  # see logs/eval/competition-full-20260811-102017.log"
+date = "2026-08-11"
+model = "gpt-5.6-sol"
+expected_n = 20
+expected_solved = 20
+expected_total = 20
+expected_median_seconds = 192.0
+expected_median_tokens = 24900.0
+status = "verified"
+note = "File is named in the doc."
+
+[[row]]
+id = "tier3-omnimath-sample50"
+doc = "Headline table: Omni-MATH sample (tier3) | n=50 | 94.0% | 98s / 13.4k tok"
+judge = "numeric"
+sources = ["tier3-sample50-20260806-180936.jsonl"]
+command = "scripts/run_eval_chain.sh 20260806-180936  # uv run python scripts/evaluate_math_agent.py --config config.toml --dataset data/benchmarks/sampled/tier3_sample50.jsonl --trials 1 --output data/eval-results/tier3-sample50-20260806-180936.jsonl"
+date = "2026-08-06"
+model = "gpt-5.6-sol"
+expected_n = 50
+expected_solved = 47
+expected_total = 50
+expected_median_seconds = 98.0
+expected_median_tokens = 13400.0
+status = "verified"
+note = "The doc's '98.0% with one retry' companion claim is covered by row tier3-failed3-retry."
+
+[[row]]
+id = "tier3-failed3-retry"
+doc = "Competition full runs: tier3 three misses retried, 2 solved (49/50 = 98.0% overall)"
+judge = "numeric"
+sources = ["tier3_failed3-retry-20260811-134355.jsonl"]
+command = "uv run python scripts/evaluate_math_agent.py --config config.retry.toml --dataset <tier3 3-miss dataset> --trials 1 --output data/eval-results/tier3_failed3-retry-20260811-134355.jsonl"
+date = "2026-08-11"
+model = "gpt-5.6-sol"
+expected_n = 3
+expected_solved = 2
+expected_total = 3
+status = "verified"
+note = "Doc names the file by glob (tier3_failed3-retry-*.jsonl); exactly one file matches. Doc prose: olympiadbench-oe-2659 and omni-math-0115 solved on retry, omni-math-0124 remains a capability miss (2 of 3)."
+
+[[row]]
+id = "formal-baseline-tier4"
+doc = "Headline table: formal baseline (tier4, 20 cases x 3 trials) | n=60 | 100% | 92s / 21.8k tok"
+judge = "lean"
+sources = ["formal-20260806-180936.jsonl"]
+command = "scripts/run_eval_chain.sh 20260806-180936  # uv run python scripts/evaluate_math_agent.py --config config.toml --dataset data/eval/formal.jsonl --trials 3 --output data/eval-results/formal-20260806-180936.jsonl"
+date = "2026-08-06"
+model = "gpt-5.6-sol"
+expected_n = 60
+expected_solved = 60
+expected_total = 60
+expected_median_seconds = 92.0
+expected_median_tokens = 21800.0
+status = "verified"
+
+[[row]]
+id = "tier4-minif2f-sample30"
+doc = "Headline table: miniF2F sample (tier4) | n=30 | 66.7% (20/30) | 503s / 35.1k tok"
+judge = "lean"
+sources = ["tier4_minif2f_sample30_chunk0-20260808-161044.jsonl", "tier4_minif2f_sample30_chunk1-20260808-161044.jsonl", "tier4_minif2f_sample30_chunk2-20260808-161044.jsonl"]
+command = "uv run python scripts/evaluate_math_agent.py --config config.toml --dataset data/benchmarks/sampled/tier4_minif2f_sample30_chunk{0,1,2}.jsonl --trials 1  # chunked rerun, see logs/eval/chunks-20260808-161044.log"
+date = "2026-08-08"
+model = "gpt-5.6-sol"
+expected_n = 30
+expected_solved = 20
+expected_total = 30
+expected_median_seconds = 503.0
+expected_median_tokens = 35100.0
+status = "verified"
+note = "Final numbers come from the 20260808-161044 chunked rerun (chunks 0-2, 10 cases each). The earlier chunk0 attempts (20260808-100258, 20260808-134402) are superseded restarts and tier4-retry-failed10-20260809-091256.jsonl is a follow-up retry run; none of them enter the doc's 20/30 figure."
+
+[[row]]
+id = "tier5-putnam-sample20"
+doc = "Headline table: Putnam sample (tier5) | n=20 | 10.0% (2/20) | 1202s / 107.2k tok"
+judge = "lean"
+sources = ["tier5_sample20_chunk0-20260808-161044.jsonl", "tier5_sample20_chunk1-20260808-161044.jsonl"]
+command = "uv run python scripts/evaluate_math_agent.py --config config.toml --dataset data/benchmarks/sampled/tier5_sample20_chunk{0,1}.jsonl --trials 1  # chunked rerun, see logs/eval/chunks-20260808-161044.log"
+date = "2026-08-08"
+model = "gpt-5.6-sol"
+expected_n = 20
+expected_solved = 2
+expected_total = 20
+expected_median_seconds = 1202.0
+expected_median_tokens = 107200.0
+status = "verified"
+note = "Only two tier5 chunk files exist; together they are the only plausible source for the 2/20 score and the 1202s median (both match). The doc's 107.2k token median could not be reproduced from these files (see build_benchmark_report.py output)."
+
+[[row]]
+id = "formal-hard-tier6"
+doc = "Headline table: formal-hard (tier6, 7 cases x 3 trials) | n=21 | 23.8% pass@1; 3/7 pass@3 | 1202s / 97.2k tok"
+judge = "lean"
+sources = ["formal-hard-20260806-180936.jsonl"]
+command = "scripts/run_eval_chain.sh 20260806-180936  # uv run python scripts/evaluate_math_agent.py --config config.toml --dataset data/eval/formal_hard.jsonl --trials 3 --output data/eval-results/formal-hard-20260806-180936.jsonl"
+date = "2026-08-06"
+model = "gpt-5.6-sol"
+expected_n = 21
+expected_solved = 5
+expected_total = 21
+expected_pass3_solved = 3
+expected_pass3_total = 7
+expected_median_seconds = 1202.0
+expected_median_tokens = 97200.0
+status = "verified"
+note = "formal-hard-20260805-220303.jsonl is an earlier run (3/21 pass@1, 600s budget) superseded by the 20260806-180936 chain run the doc reports."
+
+[[row]]
+id = "minif2f-valid-full-partial"
+doc = "Headline table: miniF2F valid FULL run (partial) | 60/244 | 58.3% (35/60) | 430s / 42.3k tok"
+judge = "lean"
+sources = ["minif2f-valid-full-20260810-161340.jsonl"]
+command = "scripts/run_minif2f_full.sh valid 1  # chunked/resumable wrapper over evaluate_math_agent.py on data/eval/minif2f_valid.jsonl"
+date = "2026-08-10"
+model = "gpt-5.6-sol"
+expected_n = 60
+expected_solved = 35
+expected_total = 60
+expected_median_seconds = 430.0
+expected_median_tokens = 42300.0
+status = "verified"
+note = "Run was deliberately stopped at 60/244 problems on 2026-08-11 (doc prose). The by-source breakdown in the doc (AIME 2/15, AMC 19/28, other 14/17) is derivable from case_id prefixes / the valid split ordering and sums to the same 35/60."
+
+[[row]]
+id = "ablation-raw-fast"
+doc = "Harness ablation: fast (tier1 basics, n=54) raw one-shot 100% (54/54), 103 tok median"
+judge = "numeric"
+sources = ["ablation-raw-fast.jsonl"]
+command = "uv run python scripts/ablation_raw_informal.py --dataset data/eval/fast.jsonl --output data/eval-results/ablation-raw-fast.jsonl"
+date = "2026-08-11"
+model = "gpt-5.6-sol"
+expected_n = 54
+expected_solved = 54
+expected_total = 54
+expected_median_tokens = 103.0
+status = "verified"
+
+[[row]]
+id = "ablation-raw-tier2"
+doc = "Harness ablation: AIME sample (tier2, n=50) raw one-shot 88.0% (44/50), 666 tok median"
+judge = "numeric"
+sources = ["ablation-raw-tier2.jsonl"]
+command = "uv run python scripts/ablation_raw_informal.py --dataset data/benchmarks/sampled/tier2_sample50.jsonl --output data/eval-results/ablation-raw-tier2.jsonl"
+date = "2026-08-11"
+model = "gpt-5.6-sol"
+expected_n = 50
+expected_solved = 44
+expected_total = 50
+expected_median_tokens = 666.0
+status = "verified"
+
+[[row]]
+id = "ablation-raw-hmmt-s1"
+doc = "Harness ablation: HMMT Feb 2025 FULL (n=20) raw one-shot sample 1: 80.0% (16/20)"
+judge = "numeric"
+sources = ["ablation-raw-hmmt-20260811-134821.jsonl"]
+command = "uv run python scripts/ablation_raw_informal.py --dataset data/benchmarks/competition/hmmt_feb_2025.jsonl --output data/eval-results/ablation-raw-hmmt-20260811-134821.jsonl  # see logs/eval/ablation-hmmt-20260811-134821.log"
+date = "2026-08-11"
+model = "gpt-5.6-sol"
+expected_n = 20
+expected_solved = 16
+expected_total = 20
+status = "verified"
+
+[[row]]
+id = "ablation-raw-hmmt-s2"
+doc = "Harness ablation: HMMT Feb 2025 FULL (n=20) raw one-shot sample 2: 95.0% (19/20)"
+judge = "numeric"
+sources = ["ablation-raw-hmmt-20260811-150823-s2.jsonl"]
+command = "uv run python scripts/ablation_raw_informal.py --dataset data/benchmarks/competition/hmmt_feb_2025.jsonl --output data/eval-results/ablation-raw-hmmt-20260811-150823-s2.jsonl  # see logs/eval/ablation-hmmt-20260811-150823-s2.log"
+date = "2026-08-11"
+model = "gpt-5.6-sol"
+expected_n = 20
+expected_solved = 19
+expected_total = 20
+status = "verified"
+
+[[row]]
+id = "ablation-raw-minif2f30"
+doc = "Harness ablation: miniF2F sample (tier4, n=30) raw one-shot 50.0% (15/30), 2.2k tok median"
+judge = "lean"
+sources = ["ablation-raw-oneshot.jsonl"]
+command = "uv run python scripts/ablation_raw_oneshot.py --dataset data/benchmarks/sampled/tier4_minif2f_sample30.jsonl --output data/eval-results/ablation-raw-oneshot.jsonl"
+date = "2026-08-11"
+model = "gpt-5.6-sol"
+expected_n = 30
+expected_solved = 15
+expected_total = 30
+expected_median_tokens = 2200.0
+status = "verified"
+
+[[row]]
+id = "ablation-raw-formal-hard"
+doc = "Harness ablation: formal-hard (tier6, n=7) raw one-shot 0/7"
+judge = "lean"
+sources = ["ablation-raw-formal-hard.jsonl"]
+command = "uv run python scripts/ablation_raw_oneshot.py --dataset data/eval/formal_hard.jsonl --output data/eval-results/ablation-raw-formal-hard.jsonl"
+date = "2026-08-11"
+model = "gpt-5.6-sol"
+expected_n = 7
+expected_solved = 0
+expected_total = 7
+status = "verified"

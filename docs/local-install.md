@@ -6,22 +6,22 @@ This guide covers setting up Conjecta math-agent on your machine for the web UI 
 
 | Requirement | Notes |
 |-------------|--------|
-| **Python 3.10+** | Check with `python --version` or `python3 --version` |
+| **Python 3.11+** | Check with `python --version` or `python3 --version` |
 | **Git** | To clone the repository |
-| **API key and endpoint** | An OpenAI-compatible endpoint serving `gpt-5.6-sol`; see [setup](openai-setup.md) |
+| **LLM API key** | [DeepSeek](deepseek-setup.md) (recommended) or [OpenAI](openai-setup.md) |
 
 Optional:
 
 | Component | Purpose |
 |-----------|---------|
-| **Lean 4** | Formal proof verification; opt in with `math-agent-lean-setup` |
+| **Lean 4** | Formal proof verification (disabled by default in `config.example.toml`) |
 | **Modern browser** | Web UI; Chrome/Edge/Firefox for folder picker features |
 
 ## 1. Clone and enter the repo
 
 ```bash
-git clone https://github.com/OWNER/REPOSITORY.git
-cd Conjecta-v0
+git clone https://github.com/wangt1anyu/math-agent.git
+cd math_agent
 ```
 
 ## 2. Create a virtual environment
@@ -121,8 +121,7 @@ copy config.example.toml config.toml
 cp config.example.toml config.toml
 ```
 
-Edit `config.toml` to set `[llm].base_url`, Lean, and logging. The model is
-fixed to `gpt-5.6-sol`; see [endpoint setup](openai-setup.md).
+Edit `config.toml` for provider, Lean, and logging. The **web UI** can store API keys in the browser instead — see [DeepSeek setup](deepseek-setup.md) or [OpenAI setup](openai-setup.md).
 
 ### Optional: Lean REPL for fast tactic search
 
@@ -156,7 +155,7 @@ math-agent-web
 
 Open [http://127.0.0.1:8000/app](http://127.0.0.1:8000/app) for the chat UI. The project overview is at [http://127.0.0.1:8000/](http://127.0.0.1:8000/).
 
-1. Confirm the server has `OPENAI_API_KEY` and the configured endpoint.
+1. Click **API Keys** and paste your provider key.
 2. Start or open a project in the sidebar.
 3. Ask a math question, inspect a URL, or upload a PDF/text file.
 
@@ -165,14 +164,14 @@ Open [http://127.0.0.1:8000/app](http://127.0.0.1:8000/app) for the chat UI. The
 **Windows:**
 
 ```cmd
-set OPENAI_API_KEY=your-api-key
+set DEEPSEEK_API_KEY=sk-your-key-here
 math-agent "Prove that sqrt(2) is irrational"
 ```
 
 **macOS / Linux:**
 
 ```bash
-export OPENAI_API_KEY=your-api-key
+export DEEPSEEK_API_KEY=sk-your-key-here
 math-agent "Prove that sqrt(2) is irrational"
 ```
 
@@ -197,7 +196,7 @@ python -c "from pypdf import PdfReader; print('pypdf OK')"
 | `math-agent-web` not found | Activate `.venv` and run `pip install -e .` again |
 | `pypdf is not installed` | `pip install "pypdf>=4.0"` |
 | PDF URL returns no text | PDF may be scanned; try a text/HTML source |
-| API errors in the UI | Check `OPENAI_API_KEY`, `[llm].base_url`, and [endpoint setup](openai-setup.md) |
+| API errors in the UI | Set key under **API Keys**; see [deepseek-setup.md](deepseek-setup.md) or [openai-setup.md](openai-setup.md) |
 | Port 8000 in use | Stop the other process or run `uvicorn math_agent.web.app:app --port 8001` |
 
 Logs are written to `logs/math-agent.log` and per-session files under `logs/sessions/`.
@@ -209,12 +208,13 @@ Logs are written to `logs/math-agent.log` and per-session files under `logs/sess
 | `fastapi`, `uvicorn`, `websockets` | Web UI and streaming |
 | `httpx` | Fetch URLs for inspection |
 | **`pypdf`** | **Extract text from PDF URLs and uploads** |
-| `openai` | OpenAI-compatible `gpt-5.6-sol` backend |
+| `openai` | LLM backend (DeepSeek also uses the OpenAI-compatible client) |
 | `sympy` | Symbolic computation tool |
 | `pytest`, `pytest-asyncio` | Tests (dev only) |
 
 ## Next steps
 
 - [API key setup](api-key-setup.md) — where to create keys and where to paste/export them
-- [GPT-5.6 Sol endpoint setup](openai-setup.md) — key, base URL, and troubleshooting
+- [DeepSeek API setup](deepseek-setup.md) — keys, models, troubleshooting
+- [OpenAI API setup](openai-setup.md) — ChatGPT API keys and models
 - [README](../README.md) — architecture overview and configuration table

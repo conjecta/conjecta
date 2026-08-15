@@ -7,7 +7,6 @@ writes the results under ``data/benchmarks/`` together with a manifest.
 
 Usage:
     .venv/bin/python scripts/build_benchmark_suite.py
-    .venv/bin/python scripts/build_benchmark_suite.py --include-noncommercial
 
 Properties:
 - Idempotent: every run overwrites the produced JSONL files and the manifest.
@@ -21,7 +20,6 @@ Properties:
 
 from __future__ import annotations
 
-import argparse
 import csv
 import json
 import random
@@ -760,8 +758,8 @@ GLOBAL_CAVEATS = [
     "All informal-numeric tracks are scored by the rule-based `numeric` "
     "judge, so only problems whose reference answer is a plain integer, "
     "decimal, or simple fraction are included.",
-    "MathArena mirrors (aime_2025, hmmt_feb_2025) are generated only with "
-    "--include-noncommercial and remain CC-BY-NC-SA-4.0.",
+    "MathArena mirrors (aime_2025, hmmt_feb_2025) are CC-BY-NC-SA-4.0: "
+    "non-commercial use only, with attribution.",
 ]
 
 
@@ -775,14 +773,6 @@ def write_cases(relpath: str, cases: list[dict]) -> Path:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--include-noncommercial",
-        action="store_true",
-        help="also download CC-BY-NC-SA benchmark sources",
-    )
-    args = parser.parse_args()
-
     SRC_DIR.mkdir(parents=True, exist_ok=True)
     generated: dict[str, tuple[list[dict], list[str]]] = {}
 
@@ -798,11 +788,8 @@ def main() -> int:
         generated[key] = result
 
     attempt("aime_1983_2024", build_aime_1983_2024)
-    if args.include_noncommercial:
-        attempt("aime_2025", build_aime_2025)
-        attempt("hmmt_feb_2025", build_hmmt_feb_2025)
-    else:
-        log("skipping non-commercial MathArena sources")
+    attempt("aime_2025", build_aime_2025)
+    attempt("hmmt_feb_2025", build_hmmt_feb_2025)
     attempt("omni_math", build_omni_math)
     attempt("olympiadbench_text", build_olympiadbench)
 
@@ -821,12 +808,7 @@ def main() -> int:
     entries = []
     all_ids: set[str] = set()
     ok = True
-    selected_specs = {
-        key: spec
-        for key, spec in FILE_SPECS.items()
-        if args.include_noncommercial or spec[5] != "CC-BY-NC-SA-4.0"
-    }
-    for key, (relpath, tier, track, source, source_url, license_) in selected_specs.items():
+    for key, (relpath, tier, track, source, source_url, license_) in FILE_SPECS.items():
         if key not in generated:
             warn(f"{relpath}: not produced (source failed)")
             continue
@@ -858,21 +840,11 @@ def main() -> int:
         )
         log(f"{relpath}: {len(loaded)} cases")
 
-    manifest_tiers = json.loads(json.dumps(TIERS))
-    if not args.include_noncommercial:
-        restricted_paths = {
-            f"data/benchmarks/{FILE_SPECS[key][0]}"
-            for key in ("aime_2025", "hmmt_feb_2025")
-        }
-        for tier in manifest_tiers.values():
-            tier["files"] = [path for path in tier["files"] if path not in restricted_paths]
-
     manifest = {
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "generator": "scripts/build_benchmark_suite.py",
         "seed": SEED,
-        "noncommercial_sources_included": args.include_noncommercial,
-        "tiers": manifest_tiers,
+        "tiers": TIERS,
         "caveats": GLOBAL_CAVEATS,
         "files": entries,
     }
@@ -885,7 +857,7 @@ def main() -> int:
     for entry in entries:
         print(f"{entry['path']:<55} {entry['tier']:<6} {entry['count']:>6}")
     print(f"{'TOTAL':<55} {'':<6} {sum(e['count'] for e in entries):>6}")
-    missing = [k for k in selected_specs if k not in generated]
+    missing = [k for k in FILE_SPECS if k not in generated]
     if missing:
         print(f"sources failed/skipped: {', '.join(missing)}")
     if not ok:

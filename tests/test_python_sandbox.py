@@ -267,3 +267,23 @@ async def test_urllib_escape_chains_blocked(code):
     result = await run_python(code)
     assert not result.success
     assert "not allowed" in result.output.lower()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "url",
+    [
+        # IPv4-mapped IPv6 literals must be normalized before the blocked-range
+        # check (mirrors net_safety.normalize_ip).
+        "http://[::ffff:127.0.0.1]:9/",
+        "http://[::ffff:169.254.169.254]/",
+        # Unspecified and multicast addresses are blocked outright.
+        "http://0.0.0.0:9/",
+        "http://224.0.0.1:9/",
+    ],
+)
+async def test_urllib_guard_blocks_normalized_special_ips(url):
+    code = "import urllib.request\n" f"urllib.request.urlopen({url!r}, timeout=5)"
+    result = await run_python(code)
+    assert not result.success
+    assert "private or reserved" in result.output

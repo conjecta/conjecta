@@ -28,6 +28,7 @@ from math_agent.web.jwt_auth import (
     phone_auth_enabled,
 )
 from math_agent.web.operations import is_admin_phone
+from math_agent.web.state_backend import get_state_backend
 from math_agent.web.user_ban import ban_message, is_phone_banned, is_user_banned
 
 log = logging.getLogger("math_agent.web.phone_auth")
@@ -115,88 +116,9 @@ SEND_IP_WINDOW_SECONDS = 60
 SEND_IP_MAX_PER_WINDOW = 10
 
 
-@dataclass
-class _VerifyState:
-    failures: int = 0
-    locked_until: float = 0.0
-
-
-@dataclass
-class _VerifyTracker:
-    _entries: dict[str, _VerifyState] = field(default_factory=dict)
-    _lock: Lock = field(default_factory=Lock)
-
-    def is_locked(self, phone: str, *, now: float | None = None) -> bool:
-        now = time.monotonic() if now is None else now
-        with self._lock:
-            state = self._entries.get(phone)
-            if state is None:
-                return False
-            if state.locked_until > now:
-                return True
-            if state.failures >= MAX_VERIFY_ATTEMPTS:
-                # Auto-renew lockout on expiry until a successful login clears it.
-                state.locked_until = now + VERIFY_LOCKOUT_SECONDS
-                return True
-            return False
-
-    def record_failure(self, phone: str, *, now: float | None = None) -> None:
-        now = time.monotonic() if now is None else now
-        with self._lock:
-            state = self._entries.setdefault(phone, _VerifyState())
-            state.failures += 1
-            if state.failures >= MAX_VERIFY_ATTEMPTS:
-                state.locked_until = now + VERIFY_LOCKOUT_SECONDS
-
-    def record_success(self, phone: str) -> None:
-        with self._lock:
-            self._entries.pop(phone, None)
-
-
-@dataclass
-class _SendFrequencyTracker:
-    """Phone: one send per cooldown. IP: bounded burst to stop SMS bombing."""
-
-    _phone_last: dict[str, float] = field(default_factory=dict)
-    _ip_hits: dict[str, list[float]] = field(default_factory=dict)
-    _lock: Lock = field(default_factory=Lock)
-
-    def check_and_record_phone(self, phone: str, *, now: float | None = None) -> None:
-        now = time.monotonic() if now is None else now
-        with self._lock:
-            last = self._phone_last.get(phone, 0.0)
-            if last > now - SEND_COOLDOWN_SECONDS:
-                raise HTTPException(
-                    status_code=429,
-                    detail="验证码发送过于频繁，请约 1 分钟后再试。",
-                )
-            self._phone_last[phone] = now
-            stale = [k for k, ts in self._phone_last.items() if ts <= now - SEND_COOLDOWN_SECONDS * 2]
-            for key in stale:
-                del self._phone_last[key]
-
-    def check_and_record_ip(self, host: str, *, now: float | None = None) -> None:
-        now = time.monotonic() if now is None else now
-        with self._lock:
-            hits = [ts for ts in self._ip_hits.get(host, []) if ts > now - SEND_IP_WINDOW_SECONDS]
-            if len(hits) >= SEND_IP_MAX_PER_WINDOW:
-                raise HTTPException(
-                    status_code=429,
-                    detail="当前网络发送验证码过于频繁，请稍后再试。",
-                )
-            hits.append(now)
-            self._ip_hits[host] = hits
-            stale_hosts = [
-                key
-                for key, values in self._ip_hits.items()
-                if not values or values[-1] <= now - SEND_IP_WINDOW_SECONDS * 2
-            ]
-            for key in stale_hosts:
-                del self._ip_hits[key]
-
-
-_verify_tracker = _VerifyTracker()
-_send_frequency_tracker = _SendFrequencyTracker()
+def _throttle():
+    """SMS throttle/lockout backend (shared across replicas when configured)."""
+    return get_state_backend().throttle
 
 
 def auth_public_config() -> dict[str, Any]:
@@ -226,13 +148,28 @@ async def send_code(payload: SendCodeRequest, request: Request):
         raise HTTPException(status_code=403, detail=ban_message())
     if is_sms_bypass_phone(phone):
         log.info("SMS bypass login via send-code for %s", mask_phone(phone))
-        return _login_success_response(phone, request, sms_bypass=True)
+        return await _login_success_response(phone, request, sms_bypass=True)
     if not dypns_configured():
         raise HTTPException(status_code=503, detail="Aliyun Dypns is not configured.")
 
     host = _client_host(request.headers, getattr(request, "client", None))
-    _send_frequency_tracker.check_and_record_phone(phone)
-    _send_frequency_tracker.check_and_record_ip(host)
+    throttle = _throttle()
+    if not await throttle.check_and_record_cooldown(
+        f"sms:phone:{phone}", cooldown_seconds=SEND_COOLDOWN_SECONDS
+    ):
+        raise HTTPException(
+            status_code=429,
+            detail="验证码发送过于频繁，请约 1 分钟后再试。",
+        )
+    if not await throttle.check_and_record_window(
+        f"sms:ip:{host}",
+        limit=SEND_IP_MAX_PER_WINDOW,
+        window_seconds=SEND_IP_WINDOW_SECONDS,
+    ):
+        raise HTTPException(
+            status_code=429,
+            detail="当前网络发送验证码过于频繁，请稍后再试。",
+        )
 
     try:
         result = await send_sms_verify_code(phone)
@@ -280,14 +217,14 @@ def _persist_user_on_login(phone: str) -> None:
         upsert_user_on_login(phone)  # logs warning, no-op
 
 
-def _login_success_response(
+async def _login_success_response(
     phone: str,
     request: Request,
     *,
     sms_bypass: bool = False,
 ) -> JSONResponse:
     _persist_user_on_login(phone)
-    _verify_tracker.record_success(phone)
+    await _throttle().record_success(f"verify:{phone}")
     token, user, ttl = issue_access_token(phone)
     body: dict[str, Any] = {
         "ok": True,
@@ -327,10 +264,15 @@ async def verify_code(payload: VerifyCodeRequest, request: Request) -> JSONRespo
         raise HTTPException(status_code=403, detail=ban_message())
     if is_sms_bypass_phone(phone):
         log.info("SMS bypass login for %s", mask_phone(phone))
-        return _login_success_response(phone, request, sms_bypass=True)
+        return await _login_success_response(phone, request, sms_bypass=True)
     if not dypns_configured():
         raise HTTPException(status_code=503, detail="Aliyun Dypns is not configured.")
-    if _verify_tracker.is_locked(phone):
+    throttle = _throttle()
+    if await throttle.is_locked(
+        f"verify:{phone}",
+        max_attempts=MAX_VERIFY_ATTEMPTS,
+        lockout_seconds=VERIFY_LOCKOUT_SECONDS,
+    ):
         raise HTTPException(status_code=429, detail="验证失败次数过多，请稍后再试。")
     out_id = payload.out_id or _send_tracker.get(phone)
     try:
@@ -339,9 +281,13 @@ async def verify_code(payload: VerifyCodeRequest, request: Request) -> JSONRespo
         log.warning("verify-code failed: %s", exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     if not passed:
-        _verify_tracker.record_failure(phone)
+        await throttle.record_failure(
+            f"verify:{phone}",
+            max_attempts=MAX_VERIFY_ATTEMPTS,
+            lockout_seconds=VERIFY_LOCKOUT_SECONDS,
+        )
         raise HTTPException(status_code=401, detail="Invalid or expired verification code.")
-    return _login_success_response(phone, request)
+    return await _login_success_response(phone, request)
 
 
 @router.post("/logout")

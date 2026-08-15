@@ -8,6 +8,10 @@ except ModuleNotFoundError:  # pragma: no cover - Python <3.11
     import tomli as tomllib
 
 import dataclasses
+import logging
+import types
+import warnings
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import RLock
@@ -20,11 +24,24 @@ if not os.environ.get("PYTEST_CURRENT_TEST"):
 
     load_dotenv()
 
+log = logging.getLogger(__name__)
+
+
+class ConfigError(Exception):
+    """Raised when the configuration is invalid.
+
+    Loading is strict by default: unknown TOML keys, uncoercible values, and
+    inconsistent cross-field combinations abort startup with a clear message
+    naming the offending key instead of silently falling back to defaults.
+    Set ``CONJECTA_CONFIG_STRICT=0`` to downgrade unknown-key errors to
+    warnings (type and validation errors still raise).
+    """
+
 
 @dataclass
 class LLMConfig:
-    provider: str = "openai"
-    model: str = "gpt-5.6-sol"
+    provider: str = "shengsuanyun"
+    model: str = "deepseek/deepseek-v4-pro"
     temperature: float = 0.7
     api_key: str = ""
     base_url: str = ""
@@ -40,8 +57,8 @@ class LLMConfig:
 
 @dataclass
 class CriticConfig:
-    provider: str = "openai"
-    model: str = "gpt-5.6-sol"
+    provider: str = "shengsuanyun"
+    model: str = "deepseek/deepseek-v4-pro"
     temperature: float = 0.2
     timeout_seconds: float = 180.0
     # Optional OpenAI-compatible endpoint override (same semantics as
@@ -110,7 +127,10 @@ class HitlConfig:
 class AgentConfig:
     max_react_steps: int = 12
     max_conclusion_revisions: int = 3
-    max_tool_calls: int = 8
+    # Registry-tool executions per solve, including resumed work. None means
+    # unlimited; 0/negative values are deprecated aliases for None and are
+    # normalized in __post_init__ with a DeprecationWarning.
+    max_tool_calls: int | None = 8
     max_wall_seconds: float = 600.0
     max_identical_action_repeats: int = 2
     conclusion_candidate_count: int = 1
@@ -227,11 +247,21 @@ class AgentConfig:
     # Research mode was removed along with its orchestrator; these two knobs
     # outlived it and are still read on the normal ReAct path (claim-check
     # refutation, and the context budget for hydrated traces). The remaining
-    # research_* settings are gone -- unknown keys in an existing config.toml
-    # are ignored, so old files keep loading.
+    # research_* settings are gone -- such keys in an existing config.toml get
+    # a dedicated "removed" warning at load time, so old files keep loading.
     research_refutation_enabled: bool = True
     research_context_max_chars: int = 24_000
     hitl: HitlConfig = field(default_factory=HitlConfig)
+
+    def __post_init__(self) -> None:
+        if self.max_tool_calls is not None and self.max_tool_calls <= 0:
+            warnings.warn(
+                "max_tool_calls=0/negative is deprecated and treated as "
+                "unlimited; use None (null) for an unlimited tool-call budget",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            self.max_tool_calls = None
 
 
 @dataclass
@@ -245,7 +275,7 @@ class VerifierConfig:
 
 @dataclass
 class LeanConfig:
-    enabled: bool = False
+    enabled: bool = True
     lake_path: str = "lake"
     lean_path: str = "lean"
     max_repair_attempts: int = 3
@@ -352,10 +382,24 @@ class KnowledgeConfig:
 @dataclass
 class MathNewsConfig:
     # Background refresh uses the system API key for this provider.
-    provider: str = "openai"
-    model: str = "gpt-5.6-sol"
+    provider: str = "deepseek"
+    model: str = "deepseek-chat"
     refresh_seconds: int = 6 * 3600
     min_interval_seconds: int = 3600
+
+
+@dataclass
+class WebConfig:
+    """Web-layer admission-control state backend.
+
+    "memory" (default) keeps rate-limit, throttle, capacity, and quota-
+    reservation state in-process — correct only for single-replica
+    deployments. "redis" shares that state across replicas via redis_url.
+    See docs/distributed-state.md.
+    """
+
+    state_backend: str = "memory"
+    redis_url: str | None = None
 
 
 @dataclass
@@ -371,65 +415,80 @@ class Config:
     search: SearchConfig = field(default_factory=SearchConfig)
     knowledge: KnowledgeConfig = field(default_factory=KnowledgeConfig)
     math_news: MathNewsConfig = field(default_factory=MathNewsConfig)
+    web: WebConfig = field(default_factory=WebConfig)
     mcp_servers: list[McpServerConfig] = field(default_factory=list)
 
 
 def _unwrap_optional(typ: Any) -> Any:
     """Return the concrete type inside ``Optional[X]`` or ``X | None``."""
     origin = get_origin(typ)
-    if origin is Union:
+    if origin is Union or origin is types.UnionType:
         args = [a for a in get_args(typ) if a is not type(None)]
         if len(args) == 1:
             return args[0]
     return typ
 
 
-def _coerce_value(field_name: str, value: Any, typ: Any, fallback: Any) -> Any:
+def _coerce_value(
+    field_name: str, value: Any, typ: Any, fallback: Any, path: str = ""
+) -> Any:
     """Coerce a raw TOML/env value to the dataclass field type.
 
-    Falls back to ``fallback`` when conversion fails so a single malformed
-    config entry does not prevent the agent from starting.
+    Raises ConfigError naming the key, expected type, and received value when
+    conversion fails; config errors must surface at startup instead of
+    silently falling back to defaults. ``fallback`` is used only when the
+    value is explicitly None (an unset Optional field).
     """
     if value is None:
         return fallback
     typ = _unwrap_optional(typ)
     if typ is Any:
         return value
+    key = f"{path}{field_name}"
     if typ is bool:
         if isinstance(value, bool):
             return value
         if isinstance(value, str):
-            return value.strip().lower() in {"1", "true", "yes", "on"}
-        return bool(value)
+            lowered = value.strip().lower()
+            if lowered in {"1", "true", "yes", "on"}:
+                return True
+            if lowered in {"0", "false", "no", "off"}:
+                return False
+        raise ConfigError(f"{key}: expected bool, got {value!r}")
     if typ is int:
+        if isinstance(value, bool) or (
+            isinstance(value, float) and not value.is_integer()
+        ):
+            raise ConfigError(f"{key}: expected int, got {value!r}")
         try:
             return int(value)
         except (TypeError, ValueError):
-            return fallback
+            raise ConfigError(f"{key}: expected int, got {value!r}") from None
     if typ is float:
+        if isinstance(value, bool):
+            raise ConfigError(f"{key}: expected float, got {value!r}")
         try:
             return float(value)
         except (TypeError, ValueError):
-            return fallback
+            raise ConfigError(f"{key}: expected float, got {value!r}") from None
     if typ is str:
         return str(value)
     origin = get_origin(typ)
     if origin is list or typ is list:
         if isinstance(value, str):
             value = [part.strip() for part in value.split(",") if part.strip()]
-        try:
-            iter(value)
-        except TypeError:
-            return fallback
+        if not isinstance(value, (list, tuple)):
+            raise ConfigError(f"{key}: expected a list, got {value!r}")
         args = get_args(typ)
         element_type = _unwrap_optional(args[0]) if args else str
         return [
-            _coerce_value(field_name, item, element_type, item) for item in value
+            _coerce_value(field_name, item, element_type, item, path=path)
+            for item in value
         ]
     return value
 
 
-def _build_dataclass(cls: type, data: dict[str, Any]) -> Any:
+def _build_dataclass(cls: type, data: dict[str, Any], section: str = "") -> Any:
     valid_fields = {f.name: f for f in cls.__dataclass_fields__.values()}
     hints = get_type_hints(cls)
     kwargs: dict[str, Any] = {}
@@ -442,8 +501,65 @@ def _build_dataclass(cls: type, data: dict[str, Any]) -> Any:
             fallback = config_field.default_factory()
         else:
             fallback = None
-        kwargs[name] = _coerce_value(name, data[name], hints.get(name, Any), fallback)
+        kwargs[name] = _coerce_value(
+            name, data[name], hints.get(name, Any), fallback, path=section
+        )
     return cls(**kwargs)
+
+
+def _config_strict() -> bool:
+    """Strict loading is the default; CONJECTA_CONFIG_STRICT=0 downgrades
+    unknown-key errors to warnings."""
+    return os.environ.get("CONJECTA_CONFIG_STRICT", "1").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+
+
+def _check_unknown_keys(
+    section: str,
+    data: dict[str, Any],
+    allowed: set[str],
+    *,
+    strict: bool,
+    warn_legacy_research: bool = False,
+) -> None:
+    """Reject (strict) or warn about (non-strict) unknown keys in a section.
+
+    Removed ``research_*`` keys always get a dedicated "removed" warning and
+    never hard-fail, so pre-removal config files keep loading.
+    """
+    unknown = sorted(key for key in data if key not in allowed)
+    if warn_legacy_research:
+        legacy = [key for key in unknown if key.startswith("research_")]
+        for key in legacy:
+            log.warning(
+                "Ignoring config key [%s] %s: research mode was removed and "
+                "this setting no longer exists",
+                section,
+                key,
+            )
+        unknown = [key for key in unknown if key not in legacy]
+    if not unknown:
+        return
+    message = f"Unknown config key(s) in [{section}]: {', '.join(unknown)}"
+    if strict:
+        raise ConfigError(
+            f"{message}. Remove the key(s) or fix the typo; set "
+            "CONJECTA_CONFIG_STRICT=0 to downgrade this to a warning."
+        )
+    log.warning(
+        "%s; ignoring them (CONJECTA_CONFIG_STRICT=0).", message
+    )
+
+
+def _section(raw: dict[str, Any], name: str) -> dict[str, Any]:
+    value = raw.get(name, {})
+    if not isinstance(value, dict):
+        raise ConfigError(f"[{name}] must be a TOML table, got {value!r}")
+    return value
 
 
 _CONFIG_CACHE: dict[Any, Config] = {}
@@ -453,6 +569,7 @@ _CONFIG_CACHE_LOCK = RLock()
 # CONJECTA_MCP_<NAME>_COMMAND keys resolved in parse_mcp_servers.
 _ENV_OVERRIDE_NAMES = (
     "CONJECTA_ARTIFACT_ROOT",
+    "CONJECTA_CONFIG_STRICT",
     "CONJECTA_LEAN_BUILD_TIMEOUT",
     "CONJECTA_LEAN_TOOLCHAIN",
     "CONJECTA_LLM_API_KEY",
@@ -505,6 +622,13 @@ def load_config(path: Path | None = None) -> Config:
         return cached
 
     config = _load_config_uncached(path)
+    # Cache misses are rare (one per distinct file+env combination), so the
+    # effective-config summary is logged exactly once per distinct config.
+    log.info(
+        "Effective config (%s): %s",
+        path if path is not None else "defaults",
+        redacted_summary(config),
+    )
     with _CONFIG_CACHE_LOCK:
         if len(_CONFIG_CACHE) >= 32:
             # Bound the cache: keys vary with env, and a pathological caller
@@ -520,23 +644,250 @@ def clear_config_cache() -> None:
         _CONFIG_CACHE.clear()
 
 
+_TOP_LEVEL_SECTIONS = {
+    "llm",
+    "agent",
+    "verifier",
+    "lean",
+    "upload",
+    "logging",
+    "search",
+    "knowledge",
+    "math_news",
+    "web",
+    "mcp_servers",
+}
+# [knowledge] holds only the nested [knowledge.embedding] table; the flat
+# KnowledgeConfig fields are mapped from it below.
+_KNOWLEDGE_KEYS = {"embedding"}
+_KNOWLEDGE_EMBEDDING_KEYS = {
+    "enabled",
+    "provider",
+    "model",
+    "api_key",
+    "hybrid_search_top_k",
+}
+
+# Reviewer names ReActAgent knows how to build for the reviewer panel.
+KNOWN_REVIEWERS = frozenset(
+    {"critic", "formal", "knowledge", "fidelity", "completeness"}
+)
+
+# Built-in tool names registered by ToolRegistry (math_agent/tools/registry.py).
+# config.py cannot import the registry (it imports config — circular), so
+# this list mirrors ToolRegistry._register_builtins; unknown names are only
+# skipped with a warning there, and are rejected here at load time.
+KNOWN_BUILTIN_TOOLS = frozenset(
+    {
+        "compute",
+        "search",
+        "search_arxiv",
+        "search_scholar",
+        "fetch_url",
+        "searching",
+        "read_sources",
+        "add_material",
+        "search_materials",
+        "search_knowledge",
+        "relate_knowledge",
+        "find_related",
+        "search_mathlib",
+        "plot_figure",
+        "formalize",
+        "lean_check",
+        "tactic_search",
+        "prove_by_lemmas",
+    }
+)
+
+
+def _validate(config: Config) -> None:
+    """Cross-field validation run on every loaded config.
+
+    Raises ConfigError on violations; defaults must always pass.
+    """
+
+    def _require_positive(section: str, name: str, value: float) -> None:
+        if value <= 0:
+            raise ConfigError(
+                f"{section}.{name} must be positive, got {value!r}"
+            )
+
+    _require_positive("llm", "timeout_seconds", config.llm.timeout_seconds)
+    _require_positive(
+        "llm", "max_calls_per_problem", config.llm.max_calls_per_problem
+    )
+    if config.llm.retry_max_attempts < 0:
+        raise ConfigError(
+            "llm.retry_max_attempts must be >= 0 (0 disables retries), "
+            f"got {config.llm.retry_max_attempts!r}"
+        )
+    _require_positive("critic", "timeout_seconds", config.critic.timeout_seconds)
+    _require_positive("agent", "max_react_steps", config.agent.max_react_steps)
+    if config.agent.max_tool_calls is not None and config.agent.max_tool_calls <= 0:
+        raise ConfigError(
+            "agent.max_tool_calls must be a positive integer or None "
+            f"(unlimited), got {config.agent.max_tool_calls!r}"
+        )
+    _require_positive("agent", "max_wall_seconds", config.agent.max_wall_seconds)
+    _require_positive(
+        "agent", "escalation_max_react_steps", config.agent.escalation_max_react_steps
+    )
+    _require_positive(
+        "agent", "escalation_max_tool_calls", config.agent.escalation_max_tool_calls
+    )
+    _require_positive("search", "max_results", config.search.max_results)
+    _require_positive(
+        "lean", "build_timeout_seconds", config.lean.build_timeout_seconds
+    )
+    _require_positive(
+        "lean", "update_timeout_seconds", config.lean.update_timeout_seconds
+    )
+
+    unknown_reviewers = sorted(set(config.agent.reviewers_enabled) - KNOWN_REVIEWERS)
+    if unknown_reviewers:
+        raise ConfigError(
+            "agent.reviewers_enabled: unknown reviewer(s) "
+            f"{', '.join(unknown_reviewers)}; known reviewers: "
+            f"{', '.join(sorted(KNOWN_REVIEWERS))}"
+        )
+
+    for field_name, tools in (
+        ("agent.tools", config.agent.tools),
+        ("agent.hitl.approval_tools", config.agent.hitl.approval_tools),
+        ("agent.hitl.auto_approve_tools", config.agent.hitl.auto_approve_tools),
+    ):
+        unknown_tools = sorted(set(tools) - KNOWN_BUILTIN_TOOLS)
+        if unknown_tools:
+            raise ConfigError(
+                f"{field_name}: unknown tool(s) {', '.join(unknown_tools)}; "
+                "built-in tools: " + ", ".join(sorted(KNOWN_BUILTIN_TOOLS))
+            )
+
+    if config.lean.enabled:
+        for name in ("lake_path", "lean_path", "workspace_dir"):
+            if not getattr(config.lean, name):
+                raise ConfigError(
+                    f"lean.{name} must be set when lean.enabled = true"
+                )
+
+    if config.verifier.formal_policy not in {
+        "explicit",
+        "all_theorems",
+        "disabled",
+    }:
+        raise ConfigError(
+            "verifier.formal_policy must be one of explicit, all_theorems, "
+            f"disabled; got {config.verifier.formal_policy!r}"
+        )
+    if config.verifier.strictness not in {"standard", "high", "maximum"}:
+        raise ConfigError(
+            "verifier.strictness must be one of standard, high, maximum; "
+            f"got {config.verifier.strictness!r}"
+        )
+    if config.logging.level.upper() not in {"DEBUG", "INFO", "WARNING", "ERROR"}:
+        raise ConfigError(
+            "logging.level must be one of DEBUG, INFO, WARNING, ERROR; "
+            f"got {config.logging.level!r}"
+        )
+    if config.agent.easy_prompt_classifier not in {"critic", "rules"}:
+        raise ConfigError(
+            "agent.easy_prompt_classifier must be 'critic' or 'rules'; "
+            f"got {config.agent.easy_prompt_classifier!r}"
+        )
+    if config.search.fallback_provider not in {"duckduckgo", "none"}:
+        raise ConfigError(
+            "search.fallback_provider must be 'duckduckgo' or 'none'; "
+            f"got {config.search.fallback_provider!r}"
+        )
+    if config.web.state_backend not in {"memory", "redis"}:
+        raise ConfigError(
+            "web.state_backend must be 'memory' or 'redis'; "
+            f"got {config.web.state_backend!r}"
+        )
+    if config.web.state_backend == "redis" and not config.web.redis_url:
+        raise ConfigError(
+            "web.redis_url must be set when web.state_backend = 'redis'"
+        )
+
+
+_SECRET_NAME_MARKERS = ("key", "token", "secret", "password")
+
+
+def _redacted(value: Any, name: str = "") -> Any:
+    if any(marker in name.lower() for marker in _SECRET_NAME_MARKERS):
+        return "***" if value else value
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return {
+            f.name: _redacted(getattr(value, f.name), f.name)
+            for f in dataclasses.fields(value)
+        }
+    if isinstance(value, dict):
+        return {k: _redacted(v, str(k)) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_redacted(item) for item in value]
+    return value
+
+
+def redacted_summary(config: Config) -> dict[str, Any]:
+    """Effective config as a plain dict, with secrets masked as ``***``.
+
+    Any field or mapping key containing key/token/secret/password (case
+    insensitive) is redacted; empty values are left as-is.
+    """
+    return _redacted(config)
+
+
 def _load_config_uncached(path: Path | None = None) -> Config:
     if path is None or not path.exists():
         config = Config()
         _apply_env_overrides(config)
+        _validate(config)
         return config
 
     with open(path, "rb") as f:
         raw = tomllib.load(f)
 
-    agent_data = raw.get("agent", {})
-    agent = _build_dataclass(AgentConfig, agent_data)
-    if isinstance(agent_data, dict):
-        hitl_data = agent_data.get("hitl", {})
-        if isinstance(hitl_data, dict):
-            agent.hitl = _build_dataclass(HitlConfig, hitl_data)
+    strict = _config_strict()
+    _check_unknown_keys("<top-level>", raw, _TOP_LEVEL_SECTIONS, strict=strict)
 
-    embedding_raw = raw.get("knowledge", {}).get("embedding", {})
+    llm_data = _section(raw, "llm")
+    _check_unknown_keys(
+        "llm",
+        llm_data,
+        set(LLMConfig.__dataclass_fields__) | {"critic", "prover"},
+        strict=strict,
+    )
+    critic_data = _section(llm_data, "critic")
+    _check_unknown_keys(
+        "llm.critic", critic_data, set(CriticConfig.__dataclass_fields__), strict=strict
+    )
+    prover_data = _section(llm_data, "prover")
+    _check_unknown_keys(
+        "llm.prover", prover_data, set(ProverConfig.__dataclass_fields__), strict=strict
+    )
+
+    agent_data = _section(raw, "agent")
+    _check_unknown_keys(
+        "agent",
+        agent_data,
+        set(AgentConfig.__dataclass_fields__),
+        strict=strict,
+        warn_legacy_research=True,
+    )
+    agent = _build_dataclass(AgentConfig, agent_data, "agent.")
+    hitl_data = _section(agent_data, "hitl")
+    _check_unknown_keys(
+        "agent.hitl", hitl_data, set(HitlConfig.__dataclass_fields__), strict=strict
+    )
+    agent.hitl = _build_dataclass(HitlConfig, hitl_data, "agent.hitl.")
+
+    knowledge_raw = _section(raw, "knowledge")
+    _check_unknown_keys("knowledge", knowledge_raw, _KNOWLEDGE_KEYS, strict=strict)
+    embedding_raw = _section(knowledge_raw, "embedding")
+    _check_unknown_keys(
+        "knowledge.embedding", embedding_raw, _KNOWLEDGE_EMBEDDING_KEYS, strict=strict
+    )
     knowledge_data = {
         "embedding_enabled": embedding_raw.get("enabled", False),
         "embedding_provider": embedding_raw.get("provider", "openai"),
@@ -545,21 +896,58 @@ def _load_config_uncached(path: Path | None = None) -> Config:
         "hybrid_search_top_k": embedding_raw.get("hybrid_search_top_k", 20),
     }
 
+    mcp_servers_raw = raw.get("mcp_servers")
+    mcp_allowed = set(McpServerConfig.__dataclass_fields__)
+    mcp_entries = (
+        mcp_servers_raw
+        if isinstance(mcp_servers_raw, list)
+        else [mcp_servers_raw]
+    )
+    for entry in mcp_entries:
+        if isinstance(entry, dict):
+            _check_unknown_keys("mcp_servers", entry, mcp_allowed, strict=strict)
+
+    sections: dict[str, tuple[type, dict[str, Any]]] = {}
+    for name, cls in (
+        ("verifier", VerifierConfig),
+        ("lean", LeanConfig),
+        ("upload", UploadConfig),
+        ("logging", LoggingConfig),
+        ("search", SearchConfig),
+        ("math_news", MathNewsConfig),
+        ("web", WebConfig),
+    ):
+        data = _section(raw, name)
+        _check_unknown_keys(name, data, set(cls.__dataclass_fields__), strict=strict)
+        sections[name] = (cls, data)
+
     config = Config(
-        llm=_build_dataclass(LLMConfig, raw.get("llm", {})),
-        critic=_build_dataclass(CriticConfig, raw.get("llm", {}).get("critic", {})),
-        prover=_build_dataclass(ProverConfig, raw.get("llm", {}).get("prover", {})),
+        llm=_build_dataclass(LLMConfig, llm_data, "llm."),
+        critic=_build_dataclass(CriticConfig, critic_data, "llm.critic."),
+        prover=_build_dataclass(ProverConfig, prover_data, "llm.prover."),
         agent=agent,
-        verifier=_build_dataclass(VerifierConfig, raw.get("verifier", {})),
-        lean=_build_dataclass(LeanConfig, raw.get("lean", {})),
-        upload=_build_dataclass(UploadConfig, raw.get("upload", {})),
-        logging=_build_dataclass(LoggingConfig, raw.get("logging", {})),
-        search=_build_dataclass(SearchConfig, raw.get("search", {})),
-        knowledge=_build_dataclass(KnowledgeConfig, knowledge_data),
-        math_news=_build_dataclass(MathNewsConfig, raw.get("math_news", {})),
-        mcp_servers=parse_mcp_servers(raw.get("mcp_servers")),
+        verifier=_build_dataclass(
+            sections["verifier"][0], sections["verifier"][1], "verifier."
+        ),
+        lean=_build_dataclass(sections["lean"][0], sections["lean"][1], "lean."),
+        upload=_build_dataclass(
+            sections["upload"][0], sections["upload"][1], "upload."
+        ),
+        logging=_build_dataclass(
+            sections["logging"][0], sections["logging"][1], "logging."
+        ),
+        search=_build_dataclass(
+            sections["search"][0], sections["search"][1], "search."
+        ),
+        knowledge=_build_dataclass(KnowledgeConfig, knowledge_data, "knowledge."),
+        math_news=_build_dataclass(
+            sections["math_news"][0], sections["math_news"][1], "math_news."
+        ),
+        web=_build_dataclass(sections["web"][0], sections["web"][1], "web."),
+        mcp_servers=parse_mcp_servers(mcp_servers_raw),
     )
     _apply_env_overrides(config)
+    _validate(config)
     return config
 
 
@@ -582,30 +970,22 @@ def _apply_env_overrides(config: Config) -> None:
         config.llm.api_key = os.environ["CONJECTA_LLM_API_KEY"]
     if os.environ.get("CONJECTA_LLM_BASE_URL"):
         config.llm.base_url = os.environ["CONJECTA_LLM_BASE_URL"]
-    if config.critic.provider == config.llm.provider and not config.critic.base_url:
-        config.critic.base_url = config.llm.base_url
     if os.environ.get("CONJECTA_LEAN_TOOLCHAIN"):
         config.lean.lean_toolchain = os.environ["CONJECTA_LEAN_TOOLCHAIN"]
     if os.environ.get("CONJECTA_LEAN_BUILD_TIMEOUT"):
-        try:
+        with suppress(ValueError):
             config.lean.build_timeout_seconds = int(
                 os.environ["CONJECTA_LEAN_BUILD_TIMEOUT"]
             )
-        except ValueError:
-            pass
     if os.environ.get("CONJECTA_MATH_NEWS_REFRESH_SECONDS"):
-        try:
+        with suppress(ValueError):
             config.math_news.refresh_seconds = int(
                 os.environ["CONJECTA_MATH_NEWS_REFRESH_SECONDS"]
             )
-        except ValueError:
-            pass
     if os.environ.get("CONJECTA_MATH_NEWS_MIN_INTERVAL_SECONDS"):
-        try:
+        with suppress(ValueError):
             config.math_news.min_interval_seconds = int(
                 os.environ["CONJECTA_MATH_NEWS_MIN_INTERVAL_SECONDS"]
             )
-        except ValueError:
-            pass
     if os.environ.get("CONJECTA_ARTIFACT_ROOT"):
         config.agent.artifact_root = os.environ["CONJECTA_ARTIFACT_ROOT"]

@@ -37,6 +37,11 @@ from math_agent.web.security import (
     request_rate_key,
     require_http_app_access,
 )
+from math_agent.web.state_backend import (
+    build_state_backend,
+    get_state_backend,
+    set_state_backend,
+)
 from math_agent.web.operations import (
     reset_usage_context,
     set_usage_context,
@@ -67,6 +72,8 @@ from math_agent.web.agent_factory import (  # noqa: F401
 web_log = logging.getLogger("math_agent.web")
 
 rate_limiter = InMemoryRateLimiter.from_env()
+# Sliding-window length enforced via the configured rate-limit backend.
+RATE_LIMIT_WINDOW_SECONDS = 60.0
 
 # Default thread pool size for asyncio.to_thread. Sized for I/O-bound work
 # (storage, Supabase, decoding), not CPU parallelism.
@@ -123,6 +130,8 @@ async def lifespan(_app: FastAPI):
     jwt_secret()
     _install_default_executor()
     config = load_config()
+    # Fail fast on a misconfigured/unavailable state backend before serving.
+    set_state_backend(build_state_backend(config))
     agent_factory._shared_mcp_client = McpClient(config.mcp_servers)
     await agent_factory._shared_mcp_client.initialize()
     seed_path = Path("data/math_news.jsonl")
@@ -149,6 +158,7 @@ async def lifespan(_app: FastAPI):
         if agent_factory._shared_mcp_client is not None:
             await agent_factory._shared_mcp_client.close()
             agent_factory._shared_mcp_client = None
+        await get_state_backend().aclose()
         global _default_executor
         if _default_executor is not None:
             # Do not block shutdown on in-flight store writes; they are all
@@ -221,7 +231,13 @@ async def app_security_middleware(request: Request, call_next):
     usage_token = None
     try:
         if request.url.path.startswith("/api/"):
-            rate_limiter.check(request_rate_key(request))
+            allowed = await get_state_backend().rate_limit.check_and_record(
+                request_rate_key(request),
+                limit=rate_limiter.limit_per_minute,
+                window_seconds=RATE_LIMIT_WINDOW_SECONDS,
+            )
+            if not allowed:
+                raise HTTPException(status_code=429, detail="Rate limit exceeded.")
             public_prefix = any(request.url.path.startswith(p) for p in _AUTH_PUBLIC_PREFIXES)
             public_card = _is_public_knowledge_card_path(request.url.path, request.method)
             if not public_prefix and not public_card:

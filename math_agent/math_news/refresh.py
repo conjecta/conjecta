@@ -18,8 +18,8 @@ log = logging.getLogger("math_agent.math_news.refresh")
 def _make_llm(config: MathNewsConfig) -> LLMBackend:
     """Build a cheap system LLM for news translation.
 
-    DeepSeek goes through its native backend so the configured public model ID
-    is passed to the provider unchanged.
+    DeepSeek goes through DeepSeekBackend directly so ``deepseek-chat`` is not
+    remapped by ``normalize_model_string`` to thinking-enabled deepseek-v4-pro.
     """
     if config.provider == "deepseek":
         from math_agent.llm.deepseek import DeepSeekBackend

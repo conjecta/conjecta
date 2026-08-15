@@ -243,9 +243,9 @@ supervisor.solve()
       ├─ ...
       ├─ step 12: conclude(answer="证明思路: ...")
       └─ verification_status = "best_effort"  ← 没闭合
-
+  
   ↓ supervisor 检测到失败 (supervisor.py:649)
-
+  
   escalation! (escalation_replan_rounds=1)
       ├─ 提取诊断: _lean_failure_digest(trace, :71)
       │   └─ text + failure_kinds + 上一轮 draft
@@ -511,7 +511,7 @@ LemmaDAGExecutor.execute()
    async def prove_one(idx, lemma):
        async with semaphore:
            return await _prove_lemma(idx, lemma, context_code, verified_snapshot, total)
-
+   
    results = await asyncio.gather(*(prove_one(idx, lemma) for idx, lemma in level))
    ```
    - 同级引理并发验证 (bounded by max_parallel；代码默认 6，config.toml 覆盖为 3)
@@ -537,8 +537,8 @@ lemma_route_temperatures = [0.0, 0.5, 0.9]
 
 | 角色 | 用途 | 配置 | 默认模型 |
 |------|------|------|----------|
-| **llm** | 主推理 | `[llm]` | gpt-5.6-sol |
-| **critic_llm** | 验证/评分 | `[llm.critic]` | gpt-5.6-sol |
+| **llm** | 主推理 | `[llm]` | deepseek-v4-pro |
+| **critic_llm** | 验证/评分 | `[llm.critic]` | deepseek-v4-pro |
 | **prover_llm** | 形式化证明 | `[llm.prover]` | (空，fall back to llm) |
 
 ### prover_llm 路由
@@ -551,7 +551,7 @@ lemma_route_temperatures = [0.0, 0.5, 0.9]
 ```toml
 [llm.prover]
 provider = "openai"
-model = "gpt-5.6-sol"
+model = "deepseek-prover-v2"
 base_url = "http://localhost:8000/v1"  # 自部署端点
 temperature = 0.7
 ```
@@ -577,7 +577,7 @@ generator = TacticGenerator(
 ```toml
 [agent]
 max_react_steps = 12                    # 普通求解轮次上限
-max_tool_calls = 8                      # 工具调用数上限 (0=无限)
+max_tool_calls = 8                      # 工具调用数上限 (None=无限; 0/负数已废弃, 等价于 None 并触发 DeprecationWarning)
 max_wall_seconds = 600                  # 整体 deadline
 max_conclusion_revisions = 3            # conclude 被打回的最大修订次数
 max_identical_action_repeats = 2        # 相同 action 连续熔断阈值 (记 identical_action_limit)

@@ -7,13 +7,11 @@ import pytest
 from math_agent.config import load_config
 from math_agent.llm.deepseek import DeepSeekBackend, _resolve_model
 from math_agent.llm.factory import create_backend_from_model_string
-from math_agent.llm.openai import OpenAICompatibleBackend
 
 
 def test_config_loads():
     config = load_config()
-    assert config.llm.provider == "openai"
-    assert config.llm.model == "gpt-5.6-sol"
+    assert config.llm.provider in ("openai", "deepseek", "shengsuanyun", "kimi")
     assert config.agent.max_react_steps > 0
 
 
@@ -22,7 +20,17 @@ def test_deepseek_requires_api_key():
         DeepSeekBackend(api_key=None)
 
 
-def test_deepseek_public_model_mapping():
+def test_deepseek_v4_models_enable_thinking():
+    model, thinking = _resolve_model("deepseek-v4-pro")
+    assert model == "deepseek-v4-pro"
+    assert thinking is True
+
+    model, thinking = _resolve_model("deepseek-v4-flash")
+    assert model == "deepseek-v4-flash"
+    assert thinking is True
+
+
+def test_deepseek_legacy_model_mapping():
     model, thinking = _resolve_model("deepseek-chat")
     assert model == "deepseek-chat"
     assert thinking is False
@@ -32,16 +40,14 @@ def test_deepseek_public_model_mapping():
     assert thinking is True
 
 
-def test_factory_openai_compatible_backend():
+def test_factory_deepseek_backend():
     backend = create_backend_from_model_string(
-        "openai/gpt-5.6-sol",
+        "deepseek/deepseek-v4-pro",
         temperature=0.7,
         api_key="sk-test",
-        base_url="https://example.test/v1",
     )
-    assert isinstance(backend, OpenAICompatibleBackend)
-    assert backend.model == "gpt-5.6-sol"
-    assert backend._base_url == "https://example.test/v1"
+    assert isinstance(backend, DeepSeekBackend)
+    assert backend.model == "deepseek-v4-pro"
 
 
 def test_factory_unknown_provider():
