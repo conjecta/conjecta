@@ -72,6 +72,24 @@ from the usage dialog. The public API accepts only the `openai` provider and
 maps it to `gpt-5.6-sol`. Stored keys are encrypted with
 `CONJECTA_API_KEY_ENCRYPTION_KEY`; see `.env.example` and `SECURITY.md`.
 
+## Using your own models (self-hosted)
+
+The fixed model surface exists for the hosted platform. If you run Conjecta
+yourself, you can point it at any models your OpenAI-compatible endpoint
+serves — no code changes needed:
+
+```bash
+# Models the Web UI will accept (comma-separated provider/model):
+export CONJECTA_PLATFORM_MODEL_ALLOWLIST="openai/gpt-4o,openai/gpt-5"
+
+# Model used for requests made with a user-bound (BYOK) endpoint key:
+export CONJECTA_USER_API_MODEL="gpt-4o"
+```
+
+Set `model` to an allowlisted model in both `[llm]` and `[llm.critic]` of
+`config.toml` (or via `CONJECTA_LLM_MODEL`) and restart the server. Leave both
+variables unset to keep the pinned `openai/gpt-5.6-sol` behavior.
+
 ## Troubleshooting
 
 ### `OpenAI API key required`

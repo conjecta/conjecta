@@ -255,8 +255,10 @@ _init_logging()
 def main():
     uvicorn.run(
         app,
-        host="127.0.0.1",
-        port=8000,
+        # Local default stays localhost-only; self-hosted deployments (Docker,
+        # LAN) opt into a wider bind via CONJECTA_WEB_HOST/CONJECTA_WEB_PORT.
+        host=os.getenv("CONJECTA_WEB_HOST", "127.0.0.1"),
+        port=int(os.getenv("CONJECTA_WEB_PORT", "8000")),
     )
 
 

@@ -427,7 +427,15 @@ _DEFAULT_PLATFORM_MODEL_ALLOWLIST = frozenset({
 
 
 def _platform_model_allowlist() -> frozenset[str]:
-    """Return the fixed public model surface; deployments cannot widen it."""
+    """Return the fixed public model surface.
+
+    Self-hosted deployments may widen it with a comma-separated
+    CONJECTA_PLATFORM_MODEL_ALLOWLIST (e.g. "openai/gpt-4o,openai/gpt-5");
+    the hosted platform leaves the variable unset.
+    """
+    raw = os.getenv("CONJECTA_PLATFORM_MODEL_ALLOWLIST", "").strip()
+    if raw:
+        return frozenset(m.strip() for m in raw.split(",") if m.strip())
     return _DEFAULT_PLATFORM_MODEL_ALLOWLIST
 
 
