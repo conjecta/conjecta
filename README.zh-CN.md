@@ -4,6 +4,9 @@
 
 [English](README.md) | 简体中文
 
+[![CI](https://github.com/conjecta/conjecta/actions/workflows/ci.yml/badge.svg)](https://github.com/conjecta/conjecta/actions/workflows/ci.yml)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
+
 项目官网：<https://conjecta.cn>
 
 Conjecta 是一个带有明确资源边界和验证边界的数学推理智能体。生产环境只有一条求解主链：
