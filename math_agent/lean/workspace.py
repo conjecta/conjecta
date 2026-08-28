@@ -71,10 +71,14 @@ class LeanWorkspace:
         for package in sorted(packages.iterdir()):
             if not package.is_dir():
                 continue
-            lib_dir = package / ".lake" / "build" / "lib" / "lean"
-            if not lib_dir.is_dir() or not any(lib_dir.rglob("*.olean")):
+            if not self._package_has_oleans(package):
                 return False
         return True
+
+    @staticmethod
+    def _package_has_oleans(package: Path) -> bool:
+        lib_dir = package / ".lake" / "build" / "lib" / "lean"
+        return lib_dir.is_dir() and any(lib_dir.rglob("*.olean"))
 
     def mark_ready(self) -> None:
         (self.root / FINGERPRINT_FILE).write_text(
@@ -111,6 +115,11 @@ class LeanWorkspace:
                         "Lean cache prefetch failed; continuing without precompiled oleans: %s",
                         cache_result.errors,
                     )
+
+            if self.config.mathlib_dep and not self._dependency_oleans_healthy():
+                build_error = await self._build_missing_dependency_packages()
+                if build_error is not None:
+                    log.warning("Lean straggler package build failed: %s", build_error)
 
             if self.config.mathlib_dep and not self._dependency_oleans_healthy():
                 log.error(
@@ -168,6 +177,40 @@ class LeanWorkspace:
             or [f"lake exe cache get failed (exit {code})"],
             warnings=self._parse_warnings(output),
         )
+
+    async def _build_missing_dependency_packages(self) -> str | None:
+        """Build dependency packages the precompiled cache did not cover.
+
+        ``lake exe cache get`` materializes oleans for mathlib and its library
+        dependencies, but not for app-side packages (e.g. Cli, which only
+        mathlib's own executables use). Build those stragglers explicitly so
+        the olean health gate reflects the standard "cache get, then build
+        the rest" mathlib setup flow. Skip when mathlib itself has no oleans:
+        then the cache fetch failed and building all of mathlib from source
+        is never the right fallback here.
+        """
+        packages = self.root / ".lake" / "packages"
+        mathlib_ok = any(
+            self._package_has_oleans(packages / name)
+            for name in ("mathlib", "mathlib4")
+        )
+        if not mathlib_ok:
+            return "mathlib oleans missing after cache prefetch"
+        missing = [
+            package.name
+            for package in sorted(packages.iterdir())
+            if package.is_dir() and not self._package_has_oleans(package)
+        ]
+        for name in missing[:4]:  # sanity cap; only small stragglers are expected
+            log.info("Building Lean dependency package not covered by the cache: %s", name)
+            code, output = await self._run_lake(
+                "build",
+                name,
+                timeout=self.config.build_timeout_seconds,
+            )
+            if code != 0:
+                return f"lake build {name} failed (exit {code}): {output[-400:]}"
+        return None
 
     async def _run_lake(self, *args: str, timeout: int) -> tuple[int, str]:
         proc: asyncio.subprocess.Process | None = None

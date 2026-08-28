@@ -83,6 +83,80 @@ async def test_workspace_ensure_ready_fails_when_dependency_oleans_missing(tmp_p
     assert not workspace.is_ready()
 
 
+@pytest.mark.asyncio
+async def test_workspace_ensure_ready_builds_cache_straggler_packages(tmp_path):
+    """`lake exe cache get` covers mathlib but not app-side packages (e.g.
+    Cli, used only by mathlib's executables); ensure_ready must build those
+    stragglers instead of declaring the workspace unavailable."""
+    config = LeanConfig(
+        workspace_dir=str(tmp_path / "ws"),
+        mathlib_dep=True,
+        prefetch_cache=True,
+    )
+    workspace = LeanWorkspace(config)
+    calls: list[tuple[str, ...]] = []
+
+    def _add_olean(root, package):
+        lib_dir = root / ".lake" / "packages" / package / ".lake" / "build" / "lib" / "lean"
+        lib_dir.mkdir(parents=True, exist_ok=True)
+        (lib_dir / f"{package}.olean").write_text("olean", encoding="utf-8")
+
+    async def fake_run_lake(self, *args: str, timeout: int):
+        calls.append(args)
+        if args and args[0] == "update":
+            self.root.mkdir(parents=True, exist_ok=True)
+            (self.root / "lake-manifest.json").write_text("{}", encoding="utf-8")
+            # Cli exists as a package dir but the cache never covers it.
+            (self.root / ".lake" / "packages" / "Cli").mkdir(parents=True, exist_ok=True)
+        if args[:2] == ("exe", "cache"):
+            _add_olean(self.root, "mathlib")
+        if args and args[0] == "build":
+            _add_olean(self.root, args[1])
+        return 0, "ok"
+
+    with patch.object(LeanWorkspace, "_run_lake", fake_run_lake):
+        result = await workspace.ensure_ready()
+
+    assert result is None
+    assert ("build", "Cli") in calls
+    assert workspace.is_ready()
+
+
+@pytest.mark.asyncio
+async def test_workspace_ensure_ready_fails_when_straggler_build_fails(tmp_path):
+    """If the straggler build itself fails, the workspace still surfaces an
+    infra failure rather than a bogus proof error later."""
+    config = LeanConfig(
+        workspace_dir=str(tmp_path / "ws"),
+        mathlib_dep=True,
+        prefetch_cache=True,
+    )
+    workspace = LeanWorkspace(config)
+
+    async def fake_run_lake(self, *args: str, timeout: int):
+        if args and args[0] == "update":
+            self.root.mkdir(parents=True, exist_ok=True)
+            (self.root / "lake-manifest.json").write_text("{}", encoding="utf-8")
+            (self.root / ".lake" / "packages" / "Cli").mkdir(parents=True, exist_ok=True)
+        if args[:2] == ("exe", "cache"):
+            lib_dir = (
+                self.root / ".lake" / "packages" / "mathlib" / ".lake" / "build" / "lib" / "lean"
+            )
+            lib_dir.mkdir(parents=True, exist_ok=True)
+            (lib_dir / "Mathlib.olean").write_text("olean", encoding="utf-8")
+        if args and args[0] == "build":
+            return 1, "lake error: build failed"
+        return 0, "ok"
+
+    with patch.object(LeanWorkspace, "_run_lake", fake_run_lake):
+        result = await workspace.ensure_ready()
+
+    assert result is not None
+    assert result.success is False
+    assert result.failure_kind == "lean_unavailable"
+    assert not workspace.is_ready()
+
+
 def test_workspace_is_ready_requires_dependency_oleans(tmp_path):
     """Direct is_ready check: marker/manifest/fingerprint present, but the
     olean health gate decides readiness."""
