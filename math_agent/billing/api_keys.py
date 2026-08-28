@@ -10,8 +10,12 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from math_agent.billing.models import StoredApiKey
 
+# Model used for requests made with a user-provided (BYOK) endpoint key. The
+# hosted platform keeps the pinned default; self-hosted deployments may point
+# their own OpenAI-compatible endpoint at any model by setting
+# CONJECTA_USER_API_MODEL (e.g. "gpt-4o"). Resolved once at import time.
 USER_MODEL_MAP: dict[str, str] = {
-    "openai": "gpt-5.6-sol",
+    "openai": os.getenv("CONJECTA_USER_API_MODEL", "").strip() or "gpt-5.6-sol",
 }
 
 _FORMAT_VERSION = "v1"

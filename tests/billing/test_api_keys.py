@@ -65,3 +65,18 @@ def test_tampered_ciphertext():
 def test_tampered_format():
     with pytest.raises(ValueError, match="Unsupported ciphertext format"):
         decrypt_api_key("not:a:valid:format")
+
+
+def test_user_model_map_env_override(monkeypatch):
+    import importlib
+
+    import math_agent.billing.api_keys as api_keys
+
+    monkeypatch.setenv("CONJECTA_USER_API_MODEL", "gpt-4o")
+    try:
+        importlib.reload(api_keys)
+        assert api_keys.USER_MODEL_MAP["openai"] == "gpt-4o"
+        assert api_keys.get_user_backend_model("openai") == "gpt-4o"
+    finally:
+        monkeypatch.delenv("CONJECTA_USER_API_MODEL", raising=False)
+        importlib.reload(api_keys)

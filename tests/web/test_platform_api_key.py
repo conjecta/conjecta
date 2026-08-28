@@ -55,3 +55,17 @@ def test_public_platform_accepts_only_gpt_5_6_sol():
     )
     with pytest.raises(HTTPException, match="Invalid or unsupported model"):
         agent_factory._resolve_platform_model("openai/gpt-4o")
+
+
+def test_self_hosted_allowlist_override(monkeypatch):
+    monkeypatch.setenv(
+        "CONJECTA_PLATFORM_MODEL_ALLOWLIST", "openai/gpt-4o,openai/gpt-5"
+    )
+    assert (
+        agent_factory._resolve_platform_model("openai/gpt-4o") == "openai/gpt-4o"
+    )
+    assert (
+        agent_factory._resolve_platform_model("openai/gpt-5") == "openai/gpt-5"
+    )
+    with pytest.raises(HTTPException, match="Invalid or unsupported model"):
+        agent_factory._resolve_platform_model("openai/gpt-5.6-sol")
