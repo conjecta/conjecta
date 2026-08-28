@@ -16,8 +16,8 @@ Lean 4 is optional and disabled until explicitly installed.
 ## Install
 
 ```bash
-git clone https://github.com/OWNER/REPOSITORY.git
-cd Conjecta-v0
+git clone https://github.com/conjecta/conjecta.git
+cd conjecta
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
