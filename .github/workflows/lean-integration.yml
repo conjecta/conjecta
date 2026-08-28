@@ -28,6 +28,10 @@ jobs:
           curl -sSfL https://elan.lean-lang.org/elan-init.sh | sh -s -- -y --default-toolchain leanprover/lean4:v4.30.0
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
+      - name: Install ripgrep
+        # The mathlib premise retriever/search tools shell out to `rg`.
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
       - name: Cache Lean workspace
         uses: actions/cache@v4
         with:
