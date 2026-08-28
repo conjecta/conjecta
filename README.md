@@ -31,7 +31,7 @@ that serves `gpt-5.6-sol`. PDF uploads also need Poppler (`pdfinfo` and
 
 ```bash
 git clone https://github.com/conjecta/conjecta.git
-cd Conjecta-v0
+cd conjecta
 # Preferred: locked install via uv (CI and production use the same path)
 uv sync --frozen --extra dev
 # Alternative without uv:
